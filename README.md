@@ -1,11 +1,186 @@
 # reese
-This is a AI Agent project implemeted by the same tech stack as Claude Code,  built on TypeScript, React, Ink, Yoga, and Bun.
-The most features are simila to nanobot which source code is under ./tmp/nanobot, only one exception is: The funcationality of sub-module skills is from ./tmp/hermes. 
-The deisgn can refer to ./tmp/docs.
-Simple channel disign and support telegram only.
-Simple model feature to support openai compatible model only which is configed at .env file.
-No database required, all info stored as markdown file. all memory and skills are man-readable and easy understood.
-support local run environment only, not require docker or remote ssh.
-support ubuntu 24 only.
 
+A personal AI agent that runs locally. Chat in the terminal or connect via Telegram. No cloud, no database — everything lives in plain markdown files.
 
+```
+reese              # open the TUI
+reese gateway      # start the Telegram gateway
+```
+
+---
+
+## Installation
+
+**Requirements:** [Bun](https://bun.sh) ≥ 1.0
+
+```bash
+# clone
+git clone <your-repo-url> reese
+cd reese
+
+# install dependencies
+bun install
+```
+
+**Install the `reese` command globally** (optional but recommended):
+
+```bash
+bun link
+```
+
+Or add a shell alias to your `~/.zshrc` / `~/.bashrc`:
+
+```bash
+alias reese='bun run --cwd /path/to/reese src/index.ts'
+```
+
+---
+
+## Configuration
+
+Copy the example env file and fill in your settings:
+
+```bash
+cp .env.example .env
+```
+
+Open `.env`:
+
+```env
+# Required — any OpenAI-compatible endpoint
+MODEL_API_KEY=sk-...
+MODEL_API_BASE=https://api.openai.com/v1
+MODEL_NAME=gpt-4o
+
+# Optional — only needed for: reese gateway
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOW_FROM=your_username,123456789
+
+# Workspace directory (stores memory, sessions, skills)
+WORKSPACE_DIR=./workspace
+```
+
+**Compatible providers:** OpenAI, Anthropic (via OpenAI proxy), Ollama, LM Studio, OpenRouter, Groq, any OpenAI-compatible endpoint.
+
+---
+
+## Run
+
+### TUI — interactive terminal
+
+```bash
+reese
+```
+
+Opens a full-screen chat interface in your terminal. Type messages, use `/` commands, stream responses live.
+
+### Gateway — Telegram bot
+
+```bash
+reese gateway
+```
+
+Starts a long-polling Telegram bot. Create a bot via [@BotFather](https://t.me/BotFather), set `TELEGRAM_BOT_TOKEN` in `.env`, and optionally restrict access with `TELEGRAM_ALLOW_FROM`.
+
+---
+
+## Commands
+
+These work in both TUI and Telegram:
+
+| Command | Description |
+|---|---|
+| `/new` | Start a new conversation (clears session history) |
+| `/stop` | Stop the current task |
+| `/dream` | Run memory consolidation now |
+| `/status` | Show current session info |
+| `/help` | Show available commands |
+
+---
+
+## Memory
+
+All memory is stored as human-readable files in `workspace/`:
+
+```
+workspace/
+  AGENTS.md          # Agent instructions (edit to customise behaviour)
+  SOUL.md            # Personality and values
+  USER.md            # What Reese knows about you
+  memory/
+    MEMORY.md        # Long-term memory
+    history.jsonl    # Conversation archive
+  sessions/          # Per-conversation state (JSON)
+  skills/            # Your custom skills (SKILL.md files)
+  HEARTBEAT.md       # Scheduled tasks (optional)
+```
+
+Edit any of these files directly. Changes take effect on the next message.
+
+### Dream
+
+`/dream` triggers a two-phase LLM process that reads `history.jsonl` and surgically updates `MEMORY.md`, `SOUL.md`, and `USER.md`. This happens automatically in the background every 2 hours (configurable).
+
+---
+
+## Skills
+
+Skills are markdown instruction files that teach Reese how to perform specific tasks.
+
+**Built-in:** `github`, `weather`, `summarize`, `plan`, `systematic-debugging`
+
+**Add your own:**
+
+```bash
+mkdir -p workspace/skills/my-skill
+cat > workspace/skills/my-skill/SKILL.md << 'EOF'
+---
+name: my-skill
+description: What this skill does
+---
+
+# My Skill
+
+Instructions for Reese...
+EOF
+```
+
+Reese will automatically discover the skill and include it in its context.
+
+---
+
+## Tools available to the agent
+
+| Tool | Description |
+|---|---|
+| `read_file` | Read a file with line pagination |
+| `write_file` | Write or overwrite a file |
+| `edit_file` | Replace text in a file (fuzzy match) |
+| `list_dir` | List directory contents |
+| `exec` | Run a shell command |
+| `grep` | Regex search in files |
+| `glob` | Find files by pattern |
+| `web_fetch` | Fetch a URL as plain text |
+| `web_search` | Search via DuckDuckGo |
+| `message` | Send a mid-turn progress message |
+| `spawn` | Fire a background subagent task |
+
+---
+
+## Project structure
+
+```
+src/
+  index.ts          entry point
+  cli.tsx           Ink/React terminal UI
+  agent/            loop, runner, context, memory, skills, hooks
+  bus/              async message queue
+  channels/         telegram
+  config/           .env schema + workspace paths
+  heartbeat/        scheduled task runner
+  providers/        OpenAI-compatible LLM client
+  session/          conversation persistence
+  tools/            all agent tools
+skills/             built-in skills
+workspace/          your data (gitignored)
+```

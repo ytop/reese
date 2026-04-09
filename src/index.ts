@@ -3,9 +3,8 @@
  * Reese — Personal AI Agent
  *
  * Usage:
- *   bun run src/index.ts              → Interactive CLI
- *   bun run src/index.ts telegram     → Telegram bot mode
- *   bun run src/index.ts --help
+ *   reese              → Interactive TUI
+ *   reese gateway      → Start gateway (Telegram bot)
  */
 
 import { loadConfig } from "./config/schema.js";
@@ -21,11 +20,11 @@ const args = process.argv.slice(2);
 
 if (args.includes("--help") || args.includes("-h")) {
   console.log(`
-Reese — Personal AI Agent
+reese — Personal AI Agent
 
 Usage:
-  bun run src/index.ts              Interactive CLI (default)
-  bun run src/index.ts telegram     Telegram bot mode
+  reese              Launch the interactive TUI
+  reese gateway      Start the gateway (Telegram bot)
 
 Environment:
   Copy .env.example to .env and fill in your settings.
@@ -63,8 +62,8 @@ async function main() {
 
   const mode = args[0];
 
-  if (mode === "telegram") {
-    // Telegram mode
+  if (mode === "gateway") {
+    // Gateway mode (Telegram)
     if (!config.telegramBotToken) {
       console.error("❌ TELEGRAM_BOT_TOKEN is not set in .env");
       process.exit(1);
@@ -74,7 +73,7 @@ async function main() {
       bus,
       config.telegramAllowFrom
     );
-    console.log(`🤖 Reese starting in Telegram mode (model: ${config.modelName})`);
+    console.log(`🤖 reese gateway starting (model: ${config.modelName})`);
 
     // Run agent loop in background
     loop.run().catch(console.error);
@@ -96,11 +95,10 @@ async function main() {
 
     await telegram.start();
   } else {
-    // CLI mode (default)
-    console.log(`🤖 Reese starting in CLI mode (model: ${config.modelName})`);
+    // TUI mode (default)
+    console.log(`🤖 reese starting (model: ${config.modelName})`);
     console.log(`   Workspace: ${config.workspaceDir}`);
 
-    // Bus outbound → stdout for non-Ink fallback
     const { startCli } = await import("./cli.js");
     startCli(loop, bus);
 

@@ -5,9 +5,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "reese": "bun run src/index.ts",
+    "gateway": "bun run src/index.ts gateway",
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
-    "telegram": "bun run src/index.ts telegram",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
