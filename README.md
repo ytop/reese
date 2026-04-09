@@ -6,5 +6,6 @@ Simple channel disign and support telegram only.
 Simple model feature to support openai compatible model only which is configed at .env file.
 No database required, all info stored as markdown file. all memory and skills are man-readable and easy understood.
 support local run environment only, not require docker or remote ssh.
+support ubuntu 24 only.
 
 
