@@ -99,10 +99,17 @@ export class TelegramChannel implements BaseChannel {
   private isAllowed(ctx: Context): boolean {
     if (!this.allowFrom.size) return true; // no allowlist = open
     const user = ctx.from;
-    if (!user) return false;
+    if (!user) {
+      console.log("[Telegram] Rejected: no user on context");
+      return false;
+    }
     const uid = String(user.id);
     const username = user.username ?? "";
-    return this.allowFrom.has(uid) || this.allowFrom.has(username) || this.allowFrom.has("*");
+    const ok = this.allowFrom.has(uid) || this.allowFrom.has(username) || this.allowFrom.has("*");
+    if (!ok) {
+      console.log(`[Telegram] Rejected user id=${uid} username=${username} (not in allowlist: ${[...this.allowFrom].join(",")})`);
+    }
+    return ok;
   }
 
   private setupHandlers(): void {
@@ -137,12 +144,24 @@ export class TelegramChannel implements BaseChannel {
     });
 
     this.bot.on("message", async (ctx) => {
-      if (!this.isAllowed(ctx)) return;
-      const msg = ctx.message;
+      const user = ctx.from;
       const chatId = String(ctx.chat.id);
-      const senderId = ctx.from ? String(ctx.from.id) : chatId;
+      const senderId = user ? String(user.id) : chatId;
+      console.log(`[Telegram] Message from user=${senderId} username=${user?.username ?? "?"} chat=${chatId}`);
+
+      if (!this.isAllowed(ctx)) {
+        console.log(`[Telegram] Message rejected (not allowed)`);
+        return;
+      }
+
+      const msg = ctx.message;
       const text = msg.text ?? msg.caption ?? "";
-      if (!text) return;
+      if (!text) {
+        console.log(`[Telegram] Message has no text, ignoring (type=${Object.keys(msg).filter(k => !['from','chat','date','message_id'].includes(k)).join(",")})`);
+        return;
+      }
+
+      console.log(`[Telegram] Publishing inbound: "${text.slice(0, 80)}"`);
 
       // Show typing indicator
       await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
@@ -155,8 +174,8 @@ export class TelegramChannel implements BaseChannel {
         timestamp: new Date(),
         metadata: {
           message_id: msg.message_id,
-          username: ctx.from?.username,
-          first_name: ctx.from?.first_name,
+          username: user?.username,
+          first_name: user?.first_name,
         },
       });
     });
@@ -165,6 +184,7 @@ export class TelegramChannel implements BaseChannel {
   private setupOutbound(): void {
     this.bus.onOutbound(async (msg) => {
       if (msg.channel !== "telegram") return;
+      console.log(`[Telegram] Outbound to chat=${msg.chatId} (${msg.content.length} chars)`);
       await this.send(msg.chatId, msg.content, msg.metadata ?? {});
     });
   }
@@ -188,21 +208,27 @@ export class TelegramChannel implements BaseChannel {
       return;
     }
     if (isProgress) {
-      // Progress: send as a collapsible expandable blockquote (or just skip in simple mode)
-      return; // Keep it clean — skip progress messages for Telegram
+      return; // Skip progress messages for Telegram
     }
 
-    if (!content || content === "[empty message]") return;
+    if (!content || content === "[empty message]") {
+      console.log(`[Telegram] Skipping empty content for chat=${chatId}`);
+      return;
+    }
 
     for (const chunk of splitMessage(content)) {
       try {
         const html = markdownToTelegramHtml(chunk);
+        console.log(`[Telegram] Sending message to chat=${chatId}`);
         await this.bot.api.sendMessage(numChatId, html, { parse_mode: "HTML" });
-      } catch {
+        console.log(`[Telegram] Sent OK`);
+      } catch (err) {
+        console.warn(`[Telegram] HTML send failed, retrying as plain text:`, err instanceof Error ? err.message : err);
         try {
           await this.bot.api.sendMessage(numChatId, chunk);
-        } catch (err) {
-          console.error("[Telegram] Failed to send message:", err);
+          console.log(`[Telegram] Plain text send OK`);
+        } catch (err2) {
+          console.error(`[Telegram] Failed to send message:`, err2);
         }
       }
     }

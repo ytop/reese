@@ -68,6 +68,9 @@ export class AgentLoop {
   private dream: Dream;
   private sessionLocks = new Map<string, Promise<void>>();
   private running = false;
+  // Resolved when stop() is called — lets consumeInbound() race exit cleanly
+  private stopResolve!: () => void;
+  private stopSignal = new Promise<null>((r) => { this.stopResolve = () => r(null); });
 
   constructor(bus: MessageBus, provider: LLMProvider, config: AppConfig) {
     this.bus = bus;
@@ -103,43 +106,52 @@ export class AgentLoop {
   /** Main loop — consume inbound messages and dispatch. */
   async run(): Promise<void> {
     this.running = true;
-    console.log("[AgentLoop] Started");
+    console.log("[AgentLoop] Started — waiting for messages");
 
     while (this.running) {
-      let msg: InboundMessage;
-      try {
-        msg = await Promise.race([
-          this.bus.consumeInbound(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("timeout")), 1000)
-          ),
-        ]);
-      } catch {
-        continue; // timeout or cancellation — loop again
-      }
+      // Race consumeInbound against stop signal so we never orphan a resolver
+      const msg = await Promise.race([
+        this.bus.consumeInbound(),
+        this.stopSignal,
+      ]);
 
-      // process in serial per session
+      if (!msg || !this.running) break;
+
+      console.log(`[AgentLoop] Received message from ${msg.channel}:${msg.chatId} — "${msg.content.slice(0, 80)}"`);
+
+      // Serial per session key
       const key = msg.sessionKeyOverride ?? sessionKey(msg);
       const prev = this.sessionLocks.get(key) ?? Promise.resolve();
-      const next = prev.then(() => this.dispatch(msg)).catch(() => {});
+      const next = prev.then(() => this.dispatch(msg)).catch((err) => {
+        console.error(`[AgentLoop] Uncaught dispatch error for ${key}:`, err);
+      });
       this.sessionLocks.set(key, next);
     }
+
+    console.log("[AgentLoop] Stopped");
   }
 
   stop(): void {
     this.running = false;
+    this.stopResolve();
   }
 
   private async dispatch(msg: InboundMessage): Promise<void> {
+    console.log(`[AgentLoop] Dispatching ${msg.channel}:${msg.chatId}`);
     try {
       const response = await this.processMessage(msg);
-      if (response) this.bus.publishOutbound(response);
+      if (response) {
+        console.log(`[AgentLoop] Sending response to ${response.channel}:${response.chatId} (${response.content.length} chars)`);
+        this.bus.publishOutbound(response);
+      } else {
+        console.log(`[AgentLoop] No response to send (tool mid-turn or command handled)`);
+      }
     } catch (err) {
-      console.error("[AgentLoop] Error:", err);
+      console.error(`[AgentLoop] Dispatch error:`, err);
       this.bus.publishOutbound({
         channel: msg.channel,
         chatId: msg.chatId,
-        content: "Sorry, I encountered an error.",
+        content: "Sorry, I encountered an error. Check the server logs.",
       });
     }
   }
@@ -209,18 +221,23 @@ export class AgentLoop {
     const key = msg.sessionKeyOverride ?? sessionKey(msg);
     const raw = msg.content.trim();
 
+    console.log(`[AgentLoop] processMessage key=${key} content="${raw.slice(0, 80)}"`);
+
     // System messages (from subagents)
     if (msg.channel === "system") {
+      console.log(`[AgentLoop] Routing to processSystemMessage`);
       return this.processSystemMessage(msg);
     }
 
     // Slash commands
     if (raw.startsWith("/")) {
+      console.log(`[AgentLoop] Handling command: ${raw.split(" ")[0]}`);
       const cmdResult = await this.handleCommand(raw, msg, key);
       if (cmdResult) return cmdResult;
     }
 
     const session = this.sessions.getOrCreate(key);
+    console.log(`[AgentLoop] Session history: ${session.messages.length} messages`);
 
     // Set context for tools
     const messageTool = this.tools.get("message") as MessageTool | undefined;
@@ -242,6 +259,8 @@ export class AgentLoop {
       channel: msg.channel,
       chatId: msg.chatId,
     });
+
+    console.log(`[AgentLoop] Calling LLM (model=${this.config.modelName}, messages=${messages.length})`);
 
     const hook = new LoopHook(this, {
       onStream: opts?.onStream,
@@ -265,8 +284,10 @@ export class AgentLoop {
       sessionKey: key,
     });
 
+    console.log(`[AgentLoop] Runner done — stopReason=${result.stopReason} toolsUsed=[${result.toolsUsed.join(",")}] contentLen=${result.finalContent?.length ?? 0}`);
+
     // Save new messages to session
-    const newMessages = result.messages.slice(1 + history.length); // skip system + old history
+    const newMessages = result.messages.slice(1 + history.length);
     session.messages.push(...newMessages);
     this.sessions.save(session);
 
@@ -276,7 +297,10 @@ export class AgentLoop {
       .catch(() => {});
 
     // If message tool sent mid-turn, don't send final response again
-    if (messageTool?.hasSentInTurn) return null;
+    if (messageTool?.hasSentInTurn) {
+      console.log(`[AgentLoop] message tool handled reply, no final outbound`);
+      return null;
+    }
 
     const content = result.finalContent ?? "(no response)";
     return { channel: msg.channel, chatId: msg.chatId, content };
