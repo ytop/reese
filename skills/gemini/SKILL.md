@@ -20,6 +20,20 @@ Invoke the Gemini CLI to process tasks and messages using Google's Gemini AI mod
 
 ## Usage
 
+### Telegram Slash Command
+
+Use `/gemini` in Telegram to ask Gemini AI directly:
+
+```
+/gemini What is the weather today?
+/gemini Explain quantum computing
+/gemini Write a haiku about coding
+```
+
+The bot will invoke the Gemini CLI and reply with the response in the channel.
+
+### Command Line
+
 ```bash
 # Interactive mode
 gemini "your prompt here"
