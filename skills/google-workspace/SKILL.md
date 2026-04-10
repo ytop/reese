@@ -37,8 +37,8 @@ on CLI, Telegram, Discord, or any platform.
 **Key practical lessons from real usage (April 2026):**
 - The downloaded credential file is **very often named `googleAPI.json`** (not `client_secret_*.json`).
 - Agent should immediately copy it: `cp /path/to/googleAPI.json ~/.reese/google_client_secret.json`
-- The most reliable way to run setup commands is using **ts-node** with the full path to the script, e.g.:
-  `GSETUP="npx ts-node /home/user/.reese/skills/productivity/google-workspace/scripts/setup.ts"`
+- The most reliable way to run setup commands is using **bun** with the full path to the script, e.g.:
+  `GSETUP="bun run /home/user/.reese/skills/productivity/google-workspace/scripts/setup.ts"`
 - Always run `$GSETUP --check` right after `--auth-code` to confirm `AUTHENTICATED`.
 - The authorization flow (including PKCE and localhost redirect) works smoothly even in this messaging platform context.
 
@@ -47,7 +47,7 @@ Define a shorthand first:
 ```bash
 REESE_HOME="${REESE_HOME:-$HOME/.reese}"
 GWORKSPACE_SKILL_DIR="$REESE_HOME/skills/productivity/google-workspace"
-GSETUP="npx ts-node $GWORKSPACE_SKILL_DIR/scripts/setup.ts"
+GSETUP="bun run $GWORKSPACE_SKILL_DIR/scripts/setup.ts"
 ```
 
 ### Step 0: Check if already set up
@@ -144,7 +144,7 @@ Should print `AUTHENTICATED`. Setup is complete — token refreshes automaticall
 - Token is stored at `google_token.json` under the active profile's `REESE_HOME` and auto-refreshes.
 - Pending OAuth session state/verifier are stored temporarily at `google_oauth_pending.json` under the active profile's `REESE_HOME` until exchange completes.
 - Reese now refuses to overwrite a full Google Workspace token with a narrower re-auth token missing Gmail scopes, so one profile's partial consent cannot silently break email actions later.
-- In practice, the most reliable shorthand for `GSETUP` on many systems is: `GSETUP="npx ts-node /path/to/.reese/skills/productivity/google-workspace/scripts/setup.ts"` (adjust path as needed).
+- In practice, the most reliable shorthand for `GSETUP` on many systems is: `GSETUP="bun run /path/to/.reese/skills/productivity/google-workspace/scripts/setup.ts"` (adjust path as needed).
 - To revoke: `$GSETUP --revoke`
 
 ## Usage
@@ -154,7 +154,7 @@ All commands go through the API script. Set `GAPI` as a shorthand:
 ```bash
 REESE_HOME="${REESE_HOME:-$HOME/.reese}"
 GWORKSPACE_SKILL_DIR="$REESE_HOME/skills/productivity/google-workspace"
-GAPI="npx ts-node $GWORKSPACE_SKILL_DIR/scripts/google_api.ts"
+GAPI="bun run $GWORKSPACE_SKILL_DIR/scripts/google_api.ts"
 ```
 
 ### Gmail
@@ -276,7 +276,7 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 | `REFRESH_FAILED` | Token revoked or expired — redo Steps 3-5 |
 | `HttpError 403: Insufficient Permission` | Missing API scope — `$GSETUP --revoke` then redo Steps 3-5 |
 | `HttpError 403: Access Not Configured` | API not enabled — user needs to enable it in Google Cloud Console |
-| `Module not found` | Run `npm install` in the google-workspace directory |
+| `Module not found` | Run `bun install` in the root directory |
 | Advanced Protection blocks auth | Workspace admin must allowlist the OAuth client ID |
 
 ## Revoking Access
