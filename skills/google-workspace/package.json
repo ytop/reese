@@ -1,0 +1,19 @@
+{
+  "name": "reese-google-workspace",
+  "version": "1.0.0",
+  "description": "Google Workspace integration for Reese Agent",
+  "main": "scripts/google_api.ts",
+  "scripts": {
+    "setup": "ts-node scripts/setup.ts",
+    "api": "ts-node scripts/google_api.ts"
+  },
+  "dependencies": {
+    "googleapis": "^140.0.0",
+    "google-auth-library": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  }
+}
