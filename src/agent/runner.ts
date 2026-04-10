@@ -1,6 +1,7 @@
 import type { LLMProvider, ChatMessage, ToolCallRequest } from "../providers/base.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { AgentHook, type AgentHookContext, stripThink } from "./hook.js";
+import { Logger } from "../logger.js";
 
 interface RunSpec {
   initialMessages: ChatMessage[];
@@ -37,6 +38,7 @@ export class AgentRunner {
   constructor(private provider: LLMProvider) {}
 
   async run(spec: RunSpec): Promise<RunResult> {
+    const logger = Logger.get();
     const hook = spec.hook ?? new AgentHook();
     const messages: ChatMessage[] = [...spec.initialMessages];
     const toolsUsed: string[] = [];
@@ -70,6 +72,7 @@ export class AgentRunner {
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error("LLM", `API error: ${errMsg}`);
         console.error(`[Runner] LLM error: ${errMsg}`);
         finalContent = `Sorry, I encountered an error calling the AI model: ${errMsg}`;
         stopReason = "error";
@@ -81,6 +84,8 @@ export class AgentRunner {
 
       // Handle tool calls
       if (response.toolCalls.length > 0) {
+        logger.info("Tools", `Executing ${response.toolCalls.length} tool(s): ${response.toolCalls.map(tc => tc.name).join(", ")}`);
+        
         if (hook.wantsStreaming()) await hook.onStreamEnd(true);
         await hook.beforeExecuteTools(ctx);
 

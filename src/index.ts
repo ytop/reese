@@ -15,6 +15,7 @@ import { TelegramChannel } from "./channels/telegram.js";
 import { HeartbeatService } from "./heartbeat/service.js";
 import { ensureWorkspace } from "./config/paths.js";
 import { writeFileSync, existsSync } from "node:fs";
+import { Logger } from "./logger.js";
 
 const args = process.argv.slice(2);
 
@@ -46,6 +47,9 @@ async function main() {
   const paths = ensureWorkspace(config.workspaceDir);
   bootstrapWorkspace(paths);
 
+  // Initialize logger
+  const logger = Logger.init(config.workspaceDir);
+
   // Core wiring
   const bus = new MessageBus();
   const provider = new OpenAICompatProvider({
@@ -74,6 +78,15 @@ async function main() {
       config.telegramAllowFrom
     );
     console.log(`🤖 reese gateway starting (model: ${config.modelName})`);
+
+    // Configure logger to send to Telegram
+    const logChatId = config.telegramLogChatId || config.telegramAllowFrom[0];
+    if (logChatId) {
+      logger.setTelegram(bus, logChatId);
+      logger.info("System", `Agent started in gateway mode (model: ${config.modelName})`);
+    } else {
+      console.warn("⚠️  No TELEGRAM_LOG_CHAT_ID or TELEGRAM_ALLOW_FROM configured - logs will only be written to file");
+    }
 
     // Run agent loop in background
     loop.run().catch(console.error);

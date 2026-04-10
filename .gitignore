@@ -2,6 +2,7 @@
 node_modules/
 dist/
 tmp/
+workspace/
 workspace/sessions/
 workspace/memory/history.jsonl
 workspace/memory/.cursor

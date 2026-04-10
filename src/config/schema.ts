@@ -10,6 +10,7 @@ const ConfigSchema = z.object({
   MODEL_NAME: z.string().default("gpt-4o"),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_ALLOW_FROM: z.string().optional(), // comma-separated
+  TELEGRAM_LOG_CHAT_ID: z.string().optional(), // chat ID to send logs to
   WORKSPACE_DIR: z.string().default("./workspace"),
   MAX_ITERATIONS: z.coerce.number().int().positive().default(50),
   MAX_TOKENS: z.coerce.number().int().positive().default(8192),
@@ -28,6 +29,7 @@ export interface AppConfig {
   modelName: string;
   telegramBotToken?: string;
   telegramAllowFrom: string[];
+  telegramLogChatId?: string;
   workspaceDir: string;
   maxIterations: number;
   maxTokens: number;
@@ -47,6 +49,7 @@ export function loadConfig(): AppConfig {
     telegramAllowFrom: raw.TELEGRAM_ALLOW_FROM
       ? raw.TELEGRAM_ALLOW_FROM.split(",").map((s) => s.trim()).filter(Boolean)
       : [],
+    telegramLogChatId: raw.TELEGRAM_LOG_CHAT_ID,
     workspaceDir: resolve(raw.WORKSPACE_DIR),
     maxIterations: raw.MAX_ITERATIONS,
     maxTokens: raw.MAX_TOKENS,

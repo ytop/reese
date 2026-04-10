@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import matter from "gray-matter";
 import { execSync } from "node:child_process";
+import { Logger } from "../logger.js";
 
 /** Built-in skills dir (relative to project root, resolved at runtime). */
 export const BUILTIN_SKILLS_DIR = join(
@@ -141,6 +142,11 @@ export class SkillsLoader {
   }
 
   loadSkillsForContext(names: string[]): string {
+    const logger = Logger.get();
+    if (names.length > 0) {
+      logger.info("Skills", `Loading skills: ${names.join(", ")}`);
+    }
+    
     return names
       .map((name) => {
         const raw = this.loadSkill(name);

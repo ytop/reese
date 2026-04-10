@@ -82,6 +82,8 @@ reese gateway
 
 Starts a long-polling Telegram bot. Create a bot via [@BotFather](https://t.me/BotFather), set `TELEGRAM_BOT_TOKEN` in `.env`, and optionally restrict access with `TELEGRAM_ALLOW_FROM`.
 
+**Logging:** When running in gateway mode, all major agent events (messages received, LLM calls, tool executions, errors) are logged to `workspace/agent.log` and sent to Telegram. Configure `TELEGRAM_LOG_CHAT_ID` to specify which chat receives logs, or it defaults to the first user in `TELEGRAM_ALLOW_FROM`.
+
 ---
 
 ## Commands

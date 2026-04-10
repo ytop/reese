@@ -1,4 +1,5 @@
 import type { InboundMessage, OutboundMessage } from "./events.js";
+import { Logger } from "../logger.js";
 
 type InboundListener = (msg: InboundMessage) => void;
 type OutboundListener = (msg: OutboundMessage) => void;
@@ -13,6 +14,11 @@ export class MessageBus {
   // ── inbound (channel → agent) ─────────────────────────────────────────────
 
   publishInbound(msg: InboundMessage): void {
+    try {
+      const logger = Logger.get();
+      logger.debug("Bus", `Inbound published: ${msg.channel}:${msg.chatId}`);
+    } catch {}
+    
     const resolve = this.inboundResolvers.shift();
     if (resolve) {
       resolve(msg);
@@ -31,6 +37,13 @@ export class MessageBus {
   // ── outbound (agent → channel) ────────────────────────────────────────────
 
   publishOutbound(msg: OutboundMessage): void {
+    try {
+      const logger = Logger.get();
+      if (!msg.metadata?._log) {
+        logger.debug("Bus", `Outbound published: ${msg.channel}:${msg.chatId}`);
+      }
+    } catch {}
+    
     for (const listener of this.outboundListeners) {
       listener(msg);
     }

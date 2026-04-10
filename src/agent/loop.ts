@@ -17,6 +17,7 @@ import { SpawnTool } from "../tools/spawn.js";
 import type { AppConfig } from "../config/schema.js";
 import type { ChatMessage } from "../providers/base.js";
 import { ensureWorkspace } from "../config/paths.js";
+import { Logger } from "../logger.js";
 
 const UNIFIED_SESSION = "unified:default";
 
@@ -106,6 +107,8 @@ export class AgentLoop {
   /** Main loop — consume inbound messages and dispatch. */
   async run(): Promise<void> {
     this.running = true;
+    const logger = Logger.get();
+    logger.info("AgentLoop", "Started — waiting for messages");
     console.log("[AgentLoop] Started — waiting for messages");
 
     while (this.running) {
@@ -117,17 +120,20 @@ export class AgentLoop {
 
       if (!msg || !this.running) break;
 
+      logger.info("Message", `Received from ${msg.channel}:${msg.chatId} — "${msg.content.slice(0, 60)}..."`);
       console.log(`[AgentLoop] Received message from ${msg.channel}:${msg.chatId} — "${msg.content.slice(0, 80)}"`);
 
       // Serial per session key
       const key = msg.sessionKeyOverride ?? sessionKey(msg);
       const prev = this.sessionLocks.get(key) ?? Promise.resolve();
       const next = prev.then(() => this.dispatch(msg)).catch((err) => {
+        logger.error("AgentLoop", `Dispatch error for ${key}: ${err instanceof Error ? err.message : String(err)}`);
         console.error(`[AgentLoop] Uncaught dispatch error for ${key}:`, err);
       });
       this.sessionLocks.set(key, next);
     }
 
+    logger.info("AgentLoop", "Stopped");
     console.log("[AgentLoop] Stopped");
   }
 
@@ -218,6 +224,7 @@ export class AgentLoop {
       onProgress?: (msg: string) => void;
     }
   ): Promise<OutboundMessage | null> {
+    const logger = Logger.get();
     const key = msg.sessionKeyOverride ?? sessionKey(msg);
     const raw = msg.content.trim();
 
@@ -260,6 +267,7 @@ export class AgentLoop {
       chatId: msg.chatId,
     });
 
+    logger.info("LLM", `Calling model=${this.config.modelName}, messages=${messages.length}, tokens~${JSON.stringify(messages).length / 4}`);
     console.log(`[AgentLoop] Calling LLM (model=${this.config.modelName}, messages=${messages.length})`);
 
     const hook = new LoopHook(this, {
@@ -284,6 +292,7 @@ export class AgentLoop {
       sessionKey: key,
     });
 
+    logger.info("LLM", `Response received — stopReason=${result.stopReason}, tools=[${result.toolsUsed.join(",")}], length=${result.finalContent?.length ?? 0}`);
     console.log(`[AgentLoop] Runner done — stopReason=${result.stopReason} toolsUsed=[${result.toolsUsed.join(",")}] contentLen=${result.finalContent?.length ?? 0}`);
 
     // Save new messages to session

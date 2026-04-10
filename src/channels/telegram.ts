@@ -197,6 +197,7 @@ export class TelegramChannel implements BaseChannel {
     const isProgress = Boolean(metadata._progress);
     const isStreamDelta = Boolean(metadata._stream_delta);
     const isStreamEnd = Boolean(metadata._stream_end);
+    const isLog = Boolean(metadata._log);
     const numChatId = parseInt(chatId, 10);
 
     if (isStreamDelta) {
@@ -218,10 +219,16 @@ export class TelegramChannel implements BaseChannel {
 
     for (const chunk of splitMessage(content)) {
       try {
-        const html = markdownToTelegramHtml(chunk);
-        console.log(`[Telegram] Sending message to chat=${chatId}`);
-        await this.bot.api.sendMessage(numChatId, html, { parse_mode: "HTML" });
-        console.log(`[Telegram] Sent OK`);
+        // Send log messages as plain text without HTML parsing
+        if (isLog) {
+          await this.bot.api.sendMessage(numChatId, chunk);
+          console.log(`[Telegram] Log sent OK`);
+        } else {
+          const html = markdownToTelegramHtml(chunk);
+          console.log(`[Telegram] Sending message to chat=${chatId}`);
+          await this.bot.api.sendMessage(numChatId, html, { parse_mode: "HTML" });
+          console.log(`[Telegram] Sent OK`);
+        }
       } catch (err) {
         console.warn(`[Telegram] HTML send failed, retrying as plain text:`, err instanceof Error ? err.message : err);
         try {
