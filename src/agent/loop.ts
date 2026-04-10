@@ -2,6 +2,7 @@ import type { InboundMessage, OutboundMessage } from "../bus/events.js";
 import { sessionKey } from "../bus/events.js";
 import type { MessageBus } from "../bus/queue.js";
 import type { LLMProvider } from "../providers/base.js";
+import { OpenAICompatProvider } from "../providers/openai_compat.js";
 import { AgentRunner } from "./runner.js";
 import { ContextBuilder } from "./context.js";
 import { Consolidator, Dream } from "./memory.js";
@@ -60,6 +61,7 @@ class LoopHook extends AgentHook {
 export class AgentLoop {
   readonly bus: MessageBus;
   private provider: LLMProvider;
+  private thinkProvider?: LLMProvider;
   private config: AppConfig;
   private runner: AgentRunner;
   private context: ContextBuilder;
@@ -78,6 +80,16 @@ export class AgentLoop {
     this.provider = provider;
     this.config = config;
     ensureWorkspace(config.workspaceDir);
+
+    // Create separate provider for think model if configured
+    if (config.thinkModelName && config.thinkModelApiKey) {
+      this.thinkProvider = new OpenAICompatProvider({
+        apiKey: config.thinkModelApiKey,
+        apiBase: config.thinkModelApiBase || config.modelApiBase,
+        defaultModel: config.thinkModelName,
+        maxTokens: config.maxTokens,
+      });
+    }
 
     this.runner = new AgentRunner(provider);
     this.context = new ContextBuilder(config.workspaceDir);
@@ -180,6 +192,15 @@ export class AgentLoop {
       return { channel: msg.channel, chatId: msg.chatId, content: "Stop requested." };
     }
 
+    if (cmd === "/think") {
+      const thinkModel = this.config.thinkModelName || this.config.modelName;
+      const userMessage = raw.slice(6).trim();
+      if (!userMessage) {
+        return { channel: msg.channel, chatId: msg.chatId, content: "Usage: /think <your question>" };
+      }
+      return null; // Continue to processMessage with think mode
+    }
+
     if (cmd === "/dream") {
       const did = await this.dream.run();
       return {
@@ -206,6 +227,7 @@ export class AgentLoop {
           "Available commands:\n" +
           "/new — start a new conversation\n" +
           "/stop — cancel current task\n" +
+          "/think <question> — use advanced model for difficult tasks\n" +
           "/dream — run memory consolidation now\n" +
           "/status — show session info\n" +
           "/help — show this help",
@@ -236,11 +258,20 @@ export class AgentLoop {
       return this.processSystemMessage(msg);
     }
 
+    // Detect /think command
+    let useThinkModel = false;
+    let actualContent = raw;
+    if (raw.toLowerCase().startsWith("/think ")) {
+      useThinkModel = true;
+      actualContent = raw.slice(7).trim();
+    }
+
     // Slash commands
     if (raw.startsWith("/")) {
       console.log(`[AgentLoop] Handling command: ${raw.split(" ")[0]}`);
       const cmdResult = await this.handleCommand(raw, msg, key);
       if (cmdResult) return cmdResult;
+      // /think returns null to continue processing
     }
 
     const session = this.sessions.getOrCreate(key);
@@ -255,15 +286,23 @@ export class AgentLoop {
     spawnTool?.setContext(msg.channel, msg.chatId);
 
     // Build compact-context messages instead of full history
-    const messages = this.context.buildCompactMessages(session.compactContext, msg.content, {
+    const messages = this.context.buildCompactMessages(session.compactContext, actualContent, {
       channel: msg.channel,
       chatId: msg.chatId,
     });
 
+    const modelToUse = useThinkModel && this.config.thinkModelName 
+      ? this.config.thinkModelName 
+      : this.config.modelName;
+    
+    const providerToUse = useThinkModel && this.thinkProvider
+      ? this.thinkProvider
+      : this.provider;
+
     const messagesText = JSON.stringify(messages);
     const preview = messagesText.slice(0, 1500 * 5).replace(/\\n/g, " ").replace(/\s+/g, " ");
-    logger.info("LLM", `Calling model=${this.config.modelName}, messages=${messages.length}, tokens~${Math.round(messagesText.length / 4)}, preview=${preview}`);
-    console.log(`[AgentLoop] Calling LLM (model=${this.config.modelName}, messages=${messages.length})`);
+    logger.info("LLM", `Calling model=${modelToUse}, messages=${messages.length}, tokens~${Math.round(messagesText.length / 4)}, preview=${preview}`);
+    console.log(`[AgentLoop] Calling LLM (model=${modelToUse}, messages=${messages.length})`);
 
     const hook = new LoopHook(this, {
       onStream: opts?.onStream,
@@ -280,11 +319,12 @@ export class AgentLoop {
     const result = await this.runner.run({
       initialMessages: messages,
       tools: this.tools,
-      model: this.config.modelName,
+      model: modelToUse,
       maxIterations: this.config.maxIterations,
       maxToolResultChars: this.config.maxToolResultChars,
       hook,
       sessionKey: key,
+      provider: providerToUse,
     });
 
     logger.info("LLM", `Response received — stopReason=${result.stopReason}, tools=[${result.toolsUsed.join(",")}], length=${result.finalContent?.length ?? 0}`);
@@ -302,7 +342,7 @@ export class AgentLoop {
     // Save compact context and a minimal message record to session
     session.compactContext = compactContext || session.compactContext;
     session.messages.push(
-      { role: "user", content: msg.content },
+      { role: "user", content: actualContent },
       { role: "assistant", content: reply }
     );
     this.sessions.save(session);

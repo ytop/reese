@@ -11,6 +11,7 @@ interface RunSpec {
   maxToolResultChars: number;
   hook?: AgentHook;
   sessionKey?: string;
+  provider?: LLMProvider;
 }
 
 interface RunResult {
@@ -46,6 +47,7 @@ export class AgentRunner {
     let stopReason: RunResult["stopReason"] = "completed";
     let emptyRetries = 0;
     let lengthRecoveries = 0;
+    const provider = spec.provider ?? this.provider;
 
     for (let iteration = 0; iteration < spec.maxIterations; iteration++) {
       const ctx: AgentHookContext = { iteration };
@@ -57,14 +59,14 @@ export class AgentRunner {
       let response;
       try {
         if (hook.wantsStreaming()) {
-          response = await this.provider.chatStream({
+          response = await provider.chatStream({
             model: spec.model,
             messages: msgs,
             tools: spec.tools.getDefinitions(),
             onDelta: async (delta) => { await hook.onStream(delta); },
           });
         } else {
-          response = await this.provider.chat({
+          response = await provider.chat({
             model: spec.model,
             messages: msgs,
             tools: spec.tools.getDefinitions(),

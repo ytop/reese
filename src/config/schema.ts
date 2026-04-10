@@ -8,6 +8,9 @@ const ConfigSchema = z.object({
   MODEL_API_KEY: z.string().min(1, "MODEL_API_KEY is required"),
   MODEL_API_BASE: z.string().url("MODEL_API_BASE must be a valid URL").default("https://api.openai.com/v1"),
   MODEL_NAME: z.string().default("gpt-4o"),
+  THINK_MODEL_NAME: z.string().optional(),
+  THINK_MODEL_API_KEY: z.string().optional(),
+  THINK_MODEL_API_BASE: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_ALLOW_FROM: z.string().optional(), // comma-separated
   TELEGRAM_LOG_CHAT_ID: z.string().optional(), // chat ID to send logs to
@@ -27,6 +30,9 @@ export interface AppConfig {
   modelApiKey: string;
   modelApiBase: string;
   modelName: string;
+  thinkModelName?: string;
+  thinkModelApiKey?: string;
+  thinkModelApiBase?: string;
   telegramBotToken?: string;
   telegramAllowFrom: string[];
   telegramLogChatId?: string;
@@ -45,6 +51,9 @@ export function loadConfig(): AppConfig {
     modelApiKey: raw.MODEL_API_KEY,
     modelApiBase: raw.MODEL_API_BASE,
     modelName: raw.MODEL_NAME,
+    thinkModelName: raw.THINK_MODEL_NAME,
+    thinkModelApiKey: raw.THINK_MODEL_API_KEY,
+    thinkModelApiBase: raw.THINK_MODEL_API_BASE,
     telegramBotToken: raw.TELEGRAM_BOT_TOKEN,
     telegramAllowFrom: raw.TELEGRAM_ALLOW_FROM
       ? raw.TELEGRAM_ALLOW_FROM.split(",").map((s) => s.trim()).filter(Boolean)
