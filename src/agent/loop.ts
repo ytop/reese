@@ -254,15 +254,8 @@ export class AgentLoop {
     const spawnTool = this.tools.get("spawn") as SpawnTool | undefined;
     spawnTool?.setContext(msg.channel, msg.chatId);
 
-    // Consolidate if needed
-    await this.consolidator.maybeConsolidate(
-      session,
-      this.config.contextWindowTokens,
-      this.config.maxTokens
-    );
-
-    const history = this.sessions.getHistory(session);
-    const messages = this.context.buildMessages(history, msg.content, {
+    // Build compact-context messages instead of full history
+    const messages = this.context.buildCompactMessages(session.compactContext, msg.content, {
       channel: msg.channel,
       chatId: msg.chatId,
     });
@@ -296,16 +289,23 @@ export class AgentLoop {
 
     logger.info("LLM", `Response received — stopReason=${result.stopReason}, tools=[${result.toolsUsed.join(",")}], length=${result.finalContent?.length ?? 0}`);
     console.log(`[AgentLoop] Runner done — stopReason=${result.stopReason} toolsUsed=[${result.toolsUsed.join(",")}] contentLen=${result.finalContent?.length ?? 0}`);
+    const rawPreview = (result.finalContent ?? "").slice(0, 1500 * 5).replace(/\n/g, " ").replace(/\s+/g, " ");
+    logger.info("LLM", `Response raw preview=${rawPreview}`);
 
-    // Save new messages to session
-    const newMessages = result.messages.slice(1 + history.length);
-    session.messages.push(...newMessages);
+    // Parse two-paragraph response: [reply, compact context]
+    const rawContent = result.finalContent ?? "";
+    const { reply, compactContext } = parseCompactResponse(rawContent);
+
+    const replyPreview = reply.slice(0, 1500 * 5).replace(/\n/g, " ").replace(/\s+/g, " ");
+    logger.info("LLM", `Response parsed — replyLen=${reply.length}, compactLen=${compactContext.length}, replyPreview=${replyPreview}`);
+
+    // Save compact context and a minimal message record to session
+    session.compactContext = compactContext || session.compactContext;
+    session.messages.push(
+      { role: "user", content: msg.content },
+      { role: "assistant", content: reply }
+    );
     this.sessions.save(session);
-
-    // Background memory consolidation
-    this.consolidator
-      .maybeConsolidate(session, this.config.contextWindowTokens, this.config.maxTokens)
-      .catch(() => {});
 
     // If message tool sent mid-turn, don't send final response again
     if (messageTool?.hasSentInTurn) {
@@ -313,8 +313,7 @@ export class AgentLoop {
       return null;
     }
 
-    const content = result.finalContent ?? "(no response)";
-    return { channel: msg.channel, chatId: msg.chatId, content };
+    return { channel: msg.channel, chatId: msg.chatId, content: reply || rawContent || "(no response)" };
   }
 
   private async processSystemMessage(msg: InboundMessage): Promise<OutboundMessage | null> {
@@ -362,4 +361,16 @@ export class AgentLoop {
   async runDream(): Promise<boolean> {
     return this.dream.run();
   }
+}
+
+/** Split LLM response into [reply paragraph, compact context paragraph]. */
+function parseCompactResponse(raw: string): { reply: string; compactContext: string } {
+  // Split on blank line(s) between paragraphs
+  const parts = raw.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const compactContext = parts[parts.length - 1];
+    const reply = parts.slice(0, parts.length - 1).join("\n\n");
+    return { reply, compactContext };
+  }
+  return { reply: raw.trim(), compactContext: "" };
 }

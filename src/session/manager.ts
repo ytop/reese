@@ -8,6 +8,7 @@ export interface Session {
   lastConsolidated: number;
   updatedAt: string;
   metadata: Record<string, unknown>;
+  compactContext?: string;
 }
 
 export class SessionManager {

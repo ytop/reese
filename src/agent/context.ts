@@ -120,4 +120,35 @@ export class ContextBuilder {
 
     return messages;
   }
+
+  /**
+   * Build a minimal message array using compact context instead of full history.
+   * The system prompt instructs the LLM to reply in two paragraphs:
+   *   1. The actual reply to the user
+   *   2. An updated compact context summary (≤900 words) for the next turn
+   */
+  buildCompactMessages(
+    compactContext: string | undefined,
+    currentMessage: string,
+    opts?: { channel?: string; chatId?: string }
+  ): ChatMessage[] {
+    const { channel, chatId } = opts ?? {};
+    const systemPrompt = this.buildSystemPrompt(channel);
+    const compactInstruction =
+      "\n\n---\n\nIMPORTANT: Reply in exactly two paragraphs separated by a blank line.\n" +
+      "Paragraph 1: Your actual reply to the user.\n" +
+      "Paragraph 2: An updated compact context summary of this entire conversation so far, " +
+      "under 900 words, written in third-person past tense, capturing key facts, decisions, " +
+      "and context needed for future turns. This paragraph is never shown to the user.";
+
+    const runtime = ContextBuilder.buildRuntimeContext(channel, chatId);
+    const userContent = compactContext
+      ? `${runtime}\n\n[Conversation context so far]:\n${compactContext}\n\n[New message]:\n${currentMessage}`
+      : `${runtime}\n\n${currentMessage}`;
+
+    return [
+      { role: "system", content: systemPrompt + compactInstruction },
+      { role: "user", content: userContent },
+    ];
+  }
 }
