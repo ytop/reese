@@ -267,7 +267,9 @@ export class AgentLoop {
       chatId: msg.chatId,
     });
 
-    logger.info("LLM", `Calling model=${this.config.modelName}, messages=${messages.length}, tokens~${JSON.stringify(messages).length / 4}`);
+    const messagesText = JSON.stringify(messages);
+    const preview = messagesText.slice(0, 1500 * 5).replace(/\\n/g, " ").replace(/\s+/g, " ");
+    logger.info("LLM", `Calling model=${this.config.modelName}, messages=${messages.length}, tokens~${Math.round(messagesText.length / 4)}, preview=${preview}`);
     console.log(`[AgentLoop] Calling LLM (model=${this.config.modelName}, messages=${messages.length})`);
 
     const hook = new LoopHook(this, {
