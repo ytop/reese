@@ -125,8 +125,31 @@ export class TelegramChannel implements BaseChannel {
         "/stop — cancel current task\n" +
         "/dream — run memory consolidation\n" +
         "/status — show session info\n" +
+        "/gemini <prompt> — query Gemini directly\n" +
         "/help — show this message"
       );
+    });
+
+    this.bot.command("gemini", async (ctx) => {
+      if (!this.isAllowed(ctx)) return;
+      const chatId = String(ctx.chat.id);
+      const senderId = ctx.from ? String(ctx.from.id) : chatId;
+      const text = ctx.message?.text ?? "";
+      const prompt = text.replace(/^\/gemini(@\w+)?\s*/, "").trim();
+      
+      if (!prompt) {
+        await ctx.reply("Usage: /gemini <your question>");
+        return;
+      }
+
+      // Show typing indicator
+      await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
+
+      // Emit gemini request event
+      this.bus.emit("gemini:request", {
+        prompt,
+        replyTo: { chatId, senderId, messageId: ctx.message?.message_id },
+      });
     });
 
     this.bot.command(["new", "stop", "dream", "status"], async (ctx) => {
@@ -178,6 +201,29 @@ export class TelegramChannel implements BaseChannel {
           first_name: user?.first_name,
         },
       });
+    });
+
+    // Listen for gemini responses
+    this.bus.on("gemini:response", async (data: any) => {
+      const { content, error, replyTo } = data;
+      if (!replyTo) return;
+      
+      const { chatId } = replyTo;
+      const numChatId = parseInt(chatId, 10);
+      
+      try {
+        if (error) {
+          await this.bot.api.sendMessage(numChatId, `❌ ${content}`);
+        } else {
+          const html = markdownToTelegramHtml(content);
+          await this.bot.api.sendMessage(numChatId, html, { parse_mode: "HTML" });
+        }
+      } catch (err) {
+        console.error(`[Telegram] Failed to send gemini response:`, err);
+        try {
+          await this.bot.api.sendMessage(numChatId, content);
+        } catch { /* ignore */ }
+      }
     });
   }
 
@@ -282,6 +328,7 @@ export class TelegramChannel implements BaseChannel {
       { command: "stop", description: "Stop current task" },
       { command: "dream", description: "Run memory consolidation" },
       { command: "status", description: "Show session info" },
+      { command: "gemini", description: "Query Gemini directly" },
       { command: "help", description: "Show help" },
     ]);
     this.bot.start({ onStart: (info) => console.log(`[Telegram] Bot @${info.username} connected`) });

@@ -96,7 +96,37 @@ These work in both TUI and Telegram:
 | `/stop` | Stop the current task |
 | `/dream` | Run memory consolidation now |
 | `/status` | Show current session info |
+| `/gemini <prompt>` | Query Gemini directly (Telegram only) |
 | `/help` | Show available commands |
+
+### Gemini Integration
+
+Reese includes optional Gemini API integration for direct queries via Telegram. To enable:
+
+1. Create `workspace/.gemini-oauth.json` with your OAuth token:
+   ```json
+   {
+     "access_token": "your-oauth-access-token",
+     "expires_at": 1712865120000
+   }
+   ```
+
+2. Optionally configure model in `.env`:
+   ```env
+   GEMINI_MODEL=gemini-2.0-flash-exp
+   ```
+
+3. Start the gateway:
+   ```bash
+   reese gateway
+   ```
+
+4. Use `/gemini` in Telegram:
+   ```
+   /gemini What is the capital of France?
+   ```
+
+The Gemini integration uses OAuth authentication from your external Gemini login. The token is read from the workspace config file and cached automatically. See [src/gemini/README.md](./src/gemini/README.md) for details.
 
 ---
 

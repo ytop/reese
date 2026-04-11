@@ -13,6 +13,7 @@ import { OpenAICompatProvider } from "./providers/openai_compat.js";
 import { AgentLoop } from "./agent/loop.js";
 import { TelegramChannel } from "./channels/telegram.js";
 import { HeartbeatService } from "./heartbeat/service.js";
+import { GeminiHandler, GeminiOAuthProvider } from "./gemini/index.js";
 import { ensureWorkspace } from "./config/paths.js";
 import { writeFileSync, existsSync } from "node:fs";
 import { Logger } from "./logger.js";
@@ -77,6 +78,21 @@ async function main() {
       bus,
       config.telegramAllowFrom
     );
+    
+    // Initialize Gemini handler with OAuth
+    let geminiHandler: GeminiHandler | null = null;
+    try {
+      const oauthProvider = new GeminiOAuthProvider(config.workspaceDir);
+      geminiHandler = new GeminiHandler({
+        getAccessToken: () => oauthProvider.getAccessToken(),
+        model: process.env.GEMINI_MODEL,
+        apiBase: process.env.GEMINI_API_BASE,
+      }, bus);
+      console.log(`🔮 Gemini integration enabled (OAuth)`);
+    } catch (err) {
+      console.log(`ℹ️  Gemini integration disabled: ${err instanceof Error ? err.message : err}`);
+    }
+    
     console.log(`🤖 reese gateway starting (model: ${config.modelName})`);
 
     // Configure logger to send to Telegram
