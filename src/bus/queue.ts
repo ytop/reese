@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import type { InboundMessage, OutboundMessage } from "./events.js";
 import { Logger } from "../logger.js";
 
@@ -5,7 +6,7 @@ type InboundListener = (msg: InboundMessage) => void;
 type OutboundListener = (msg: OutboundMessage) => void;
 
 /** Dual async queue linking channels to the agent loop. */
-export class MessageBus {
+export class MessageBus extends EventEmitter {
   private inboundQueue: InboundMessage[] = [];
   private outboundQueue: OutboundMessage[] = [];
   private inboundResolvers: Array<(msg: InboundMessage) => void> = [];
