@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 export interface GeminiOAuthConfig {
   access_token: string;
@@ -12,8 +13,8 @@ export class GeminiOAuthProvider {
   private cachedToken: string | null = null;
   private cacheExpiry: number = 0;
 
-  constructor(workspaceDir: string) {
-    this.configPath = join(workspaceDir, ".gemini-oauth.json");
+  constructor(_workspaceDir: string) {
+    this.configPath = join(homedir(), ".gemini", "oauth_creds.json");
   }
 
   async getAccessToken(): Promise<string> {
