@@ -203,26 +203,29 @@ export class TelegramChannel implements BaseChannel {
       });
     });
 
-    // Listen for gemini responses
+    // Listen for gemini streaming
+    this.bus.on("gemini:chunk", async (data: any) => {
+      const { chunk, replyTo } = data;
+      if (!replyTo) return;
+      const numChatId = parseInt(replyTo.chatId, 10);
+      await this.handleStreamDelta(numChatId, replyTo.chatId, chunk);
+    });
+
+    this.bus.on("gemini:done", async (data: any) => {
+      const { replyTo } = data;
+      if (!replyTo) return;
+      const numChatId = parseInt(replyTo.chatId, 10);
+      await this.finalizeStream(numChatId, replyTo.chatId);
+    });
+
     this.bus.on("gemini:response", async (data: any) => {
       const { content, error, replyTo } = data;
-      if (!replyTo) return;
-      
-      const { chatId } = replyTo;
-      const numChatId = parseInt(chatId, 10);
-      
+      if (!replyTo || !error) return;
+      const numChatId = parseInt(replyTo.chatId, 10);
       try {
-        if (error) {
-          await this.bot.api.sendMessage(numChatId, `❌ ${content}`);
-        } else {
-          const html = markdownToTelegramHtml(content);
-          await this.bot.api.sendMessage(numChatId, html, { parse_mode: "HTML" });
-        }
+        await this.bot.api.sendMessage(numChatId, `❌ ${content}`);
       } catch (err) {
-        console.error(`[Telegram] Failed to send gemini response:`, err);
-        try {
-          await this.bot.api.sendMessage(numChatId, content);
-        } catch { /* ignore */ }
+        console.error(`[Telegram] Failed to send gemini error:`, err);
       }
     });
   }

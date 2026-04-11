@@ -1,4 +1,4 @@
-import { GeminiClient, type GeminiRequest, type GeminiResponse } from "./client.js";
+import { GeminiClient, type GeminiResponse } from "./client.js";
 import type { MessageBus } from "../bus/queue.js";
 import { Logger } from "../logger.js";
 
@@ -20,26 +20,21 @@ export class GeminiHandler {
   private setupBusHandlers() {
     this.bus.on("gemini:request", async (data: any) => {
       const { prompt, history, replyTo } = data;
-      
+
       this.logger.info(`[Gemini] Processing request: ${prompt.slice(0, 50)}...`);
-      
-      const request: GeminiRequest = { prompt, history };
-      const response = await this.client.generate(request);
-      
-      if (response.error) {
-        this.logger.error(`[Gemini] Error: ${response.error}`);
-        this.bus.emit("gemini:response", {
-          content: `Error: ${response.error}`,
-          error: true,
-          replyTo,
-        });
-      } else {
-        this.logger.info(`[Gemini] Response: ${response.content.slice(0, 50)}...`);
-        this.bus.emit("gemini:response", {
-          content: response.content,
-          error: false,
-          replyTo,
-        });
+
+      try {
+        let fullContent = "";
+        for await (const chunk of this.client.stream({ prompt, history })) {
+          fullContent += chunk;
+          this.bus.emit("gemini:chunk", { chunk, replyTo });
+        }
+        this.logger.info(`[Gemini] Response complete (${fullContent.length} chars)`);
+        this.bus.emit("gemini:done", { content: fullContent, replyTo });
+      } catch (err) {
+        const error = String(err);
+        this.logger.error(`[Gemini] Error: ${error}`);
+        this.bus.emit("gemini:response", { content: error, error: true, replyTo });
       }
     });
   }

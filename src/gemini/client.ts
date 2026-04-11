@@ -29,37 +29,57 @@ export class GeminiClient {
 
   async generate(request: GeminiRequest): Promise<GeminiResponse> {
     try {
-      const token = await this.getAccessToken();
-      const contents = this.buildContents(request);
-      const url = `${this.apiBase}/models/${this.model}:generateContent`;
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          contents,
-          generationConfig: {
-            temperature: 1,
-            topP: 0.95,
-            topK: 40,
-            maxOutputTokens: 8192,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        return { content: "", error: `API error: ${response.status} ${error}` };
+      let content = "";
+      for await (const chunk of this.stream(request)) {
+        content += chunk;
       }
-
-      const data = await response.json();
-      const content = this.extractContent(data);
       return { content };
     } catch (err) {
       return { content: "", error: String(err) };
+    }
+  }
+
+  async *stream(request: GeminiRequest): AsyncGenerator<string> {
+    const token = await this.getAccessToken();
+    const url = `${this.apiBase}/models/${this.model}:streamGenerateContent?alt=sse`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        contents: this.buildContents(request),
+        generationConfig: { temperature: 1, topP: 0.95, topK: 40, maxOutputTokens: 8192 },
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`API error: ${response.status} ${error}`);
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop()!;
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const json = line.slice(6).trim();
+        if (!json || json === "[DONE]") continue;
+        try {
+          const data = JSON.parse(json);
+          const text = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "";
+          if (text) yield text;
+        } catch { /* skip malformed chunks */ }
+      }
     }
   }
 
@@ -85,15 +105,4 @@ export class GeminiClient {
     return contents;
   }
 
-  private extractContent(data: any): string {
-    try {
-      const candidate = data.candidates?.[0];
-      if (!candidate) return "";
-      
-      const parts = candidate.content?.parts || [];
-      return parts.map((p: any) => p.text || "").join("");
-    } catch {
-      return "";
-    }
-  }
 }
