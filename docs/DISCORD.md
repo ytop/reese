@@ -10,20 +10,26 @@ Reese supports Discord as a fallback channel when Telegram hits rate limits.
    - Go to "Bot" tab and click "Add Bot"
    - Copy the bot token
 
-2. Add bot to your server:
+2. Enable Privileged Gateway Intents:
+   - Go to the "Bot" tab in your application
+   - Scroll down to "Privileged Gateway Intents"
+   - Enable **Message Content Intent** (This is required for the bot to read your messages)
+   - Click "Save Changes"
+
+3. Add bot to your server:
    - Go to OAuth2 → URL Generator
    - Select scopes: `bot`
    - Select permissions: `Send Messages`, `Read Messages/View Channels`, `Read Message History`
    - Copy the generated URL and open it in your browser
    - Select your server and authorize
 
-3. Configure `.env`:
+4. Configure `.env`:
    ```env
    DISCORD_BOT_TOKEN=your-bot-token-here
    DISCORD_ALLOW_FROM=user_id1,user_id2
    ```
 
-4. Get your Discord user ID:
+5. Get your Discord user ID:
    - Enable Developer Mode in Discord (Settings → Advanced → Developer Mode)
    - Right-click your username and select "Copy ID"
 
