@@ -12,16 +12,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "discord.js": "^14.26.2",
+    "dotenv": "^16.4.7",
+    "google-auth-library": "^9.0.0",
+    "googleapis": "^140.0.0",
     "grammy": "^1.31.0",
     "gray-matter": "^4.0.3",
     "ink": "^5.1.0",
     "ink-text-input": "^6.0.0",
     "openai": "^4.95.1",
     "react": "^18.3.1",
-    "zod": "^3.24.2",
-    "dotenv": "^16.4.7",
-    "googleapis": "^140.0.0",
-    "google-auth-library": "^9.0.0"
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -14,6 +14,8 @@ const ConfigSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_ALLOW_FROM: z.string().optional(), // comma-separated
   TELEGRAM_LOG_CHAT_ID: z.string().optional(), // chat ID to send logs to
+  DISCORD_BOT_TOKEN: z.string().optional(),
+  DISCORD_ALLOW_FROM: z.string().optional(), // comma-separated
   WORKSPACE_DIR: z.string().default("./workspace"),
   MAX_ITERATIONS: z.coerce.number().int().positive().default(50),
   MAX_TOKENS: z.coerce.number().int().positive().default(8192),
@@ -36,6 +38,8 @@ export interface AppConfig {
   telegramBotToken?: string;
   telegramAllowFrom: string[];
   telegramLogChatId?: string;
+  discordBotToken?: string;
+  discordAllowFrom: string[];
   workspaceDir: string;
   maxIterations: number;
   maxTokens: number;
@@ -59,6 +63,10 @@ export function loadConfig(): AppConfig {
       ? raw.TELEGRAM_ALLOW_FROM.split(",").map((s) => s.trim()).filter(Boolean)
       : [],
     telegramLogChatId: raw.TELEGRAM_LOG_CHAT_ID,
+    discordBotToken: raw.DISCORD_BOT_TOKEN,
+    discordAllowFrom: raw.DISCORD_ALLOW_FROM
+      ? raw.DISCORD_ALLOW_FROM.split(",").map((s) => s.trim()).filter(Boolean)
+      : [],
     workspaceDir: resolve(raw.WORKSPACE_DIR),
     maxIterations: raw.MAX_ITERATIONS,
     maxTokens: raw.MAX_TOKENS,

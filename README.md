@@ -57,11 +57,17 @@ MODEL_NAME=gpt-4o
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_ALLOW_FROM=your_username,123456789
 
+# Optional — Discord fallback (auto-switches when Telegram rate limited)
+DISCORD_BOT_TOKEN=
+DISCORD_ALLOW_FROM=user_id1,user_id2
+
 # Workspace directory (stores memory, sessions, skills)
 WORKSPACE_DIR=./workspace
 ```
 
 **Compatible providers:** OpenAI, Anthropic (via OpenAI proxy), Ollama, LM Studio, OpenRouter, Groq, any OpenAI-compatible endpoint.
+
+**Discord fallback:** When both Telegram and Discord are configured, the gateway automatically switches to Discord if Telegram hits rate limits. See [docs/DISCORD.md](./docs/DISCORD.md) for setup.
 
 ---
 

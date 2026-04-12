@@ -75,17 +75,47 @@ async function main() {
   }
 
   if (mode === "gateway") {
-    // Gateway mode (Telegram)
-    if (!config.telegramBotToken) {
-      console.error("❌ TELEGRAM_BOT_TOKEN is not set in .env");
+    // Gateway mode with automatic Discord fallback
+    const channels = [];
+    
+    if (config.telegramBotToken) {
+      const { TelegramChannel } = await import("./channels/telegram.js");
+      const telegram = new TelegramChannel(
+        config.telegramBotToken,
+        bus,
+        config.telegramAllowFrom,
+        provider,
+      );
+      channels.push({
+        name: "telegram",
+        channel: telegram,
+        rateLimitWindow: 60000, // 1 minute
+        rateLimitMax: 20, // 20 messages per minute
+      });
+    }
+    
+    if (config.discordBotToken) {
+      const { DiscordChannel } = await import("./channels/discord.js");
+      const discord = new DiscordChannel(
+        config.discordBotToken,
+        bus,
+        config.discordAllowFrom,
+      );
+      channels.push({
+        name: "discord",
+        channel: discord,
+        rateLimitWindow: 60000,
+        rateLimitMax: 50,
+      });
+    }
+    
+    if (!channels.length) {
+      console.error("❌ No bot tokens configured. Set TELEGRAM_BOT_TOKEN or DISCORD_BOT_TOKEN in .env");
       process.exit(1);
     }
-    const telegram = new TelegramChannel(
-      config.telegramBotToken,
-      bus,
-      config.telegramAllowFrom,
-      provider,
-    );
+    
+    const { ChannelManager } = await import("./channels/manager.js");
+    const manager = new ChannelManager(bus, channels);
     
     // Initialize Gemini handler with OAuth
     let geminiHandler: GeminiHandler | null = null;
@@ -102,14 +132,15 @@ async function main() {
     }
     
     console.log(`🤖 reese gateway starting (model: ${config.modelName})`);
+    console.log(`   Channels: ${channels.map(c => c.name).join(", ")}`);
 
-    // Configure logger to send to Telegram
+    // Configure logger to send to Telegram if available
     const logChatId = config.telegramLogChatId || config.telegramAllowFrom[0];
-    if (logChatId) {
+    if (logChatId && config.telegramBotToken) {
       logger.setTelegram(bus, logChatId);
       logger.info("System", `Agent started in gateway mode (model: ${config.modelName})`);
     } else {
-      console.warn("⚠️  No TELEGRAM_LOG_CHAT_ID or TELEGRAM_ALLOW_FROM configured - logs will only be written to file");
+      console.warn("⚠️  No TELEGRAM_LOG_CHAT_ID configured - logs will only be written to file");
     }
 
     // Run agent loop in background
@@ -120,17 +151,17 @@ async function main() {
       console.log("\n[Shutdown] Stopping...");
       loop.stop();
       heartbeat.stop();
-      await telegram.stop();
+      await manager.stop();
       process.exit(0);
     });
     process.once("SIGTERM", async () => {
       loop.stop();
       heartbeat.stop();
-      await telegram.stop();
+      await manager.stop();
       process.exit(0);
     });
 
-    await telegram.start();
+    await manager.start();
   } else {
     // TUI mode (default)
     console.log(`🤖 reese starting (model: ${config.modelName})`);
