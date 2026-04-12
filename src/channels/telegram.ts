@@ -1,6 +1,7 @@
 import { Bot, type Context, InputFile } from "grammy";
 import type { MessageBus } from "../bus/queue.js";
 import type { BaseChannel } from "./base.js";
+import type { LLMProvider } from "../providers/base.js";
 
 const TELEGRAM_MAX_LEN = 4000;
 
@@ -87,7 +88,8 @@ export class TelegramChannel implements BaseChannel {
   constructor(
     token: string,
     private bus: MessageBus,
-    allowFrom: string[] = []
+    allowFrom: string[] = [],
+    private provider?: LLMProvider,
   ) {
     this.bot = new Bot(token);
     this.allowFrom = new Set(allowFrom);
@@ -126,6 +128,7 @@ export class TelegramChannel implements BaseChannel {
         "/dream — run memory consolidation\n" +
         "/status — show session info\n" +
         "/gemini <prompt> — query Gemini directly\n" +
+        "/btw <message> — raw LLM query (no memory, no context)\n" +
         "/help — show this message"
       );
     });
@@ -150,6 +153,34 @@ export class TelegramChannel implements BaseChannel {
         prompt,
         replyTo: { chatId, senderId, messageId: ctx.message?.message_id },
       });
+    });
+
+    this.bot.command("btw", async (ctx) => {
+      if (!this.isAllowed(ctx)) return;
+      const text = ctx.message?.text ?? "";
+      const prompt = text.replace(/^\/btw(@\w+)?\s*/, "").trim();
+      if (!prompt) {
+        await ctx.reply("Usage: /btw <your message>");
+        return;
+      }
+      if (!this.provider) {
+        await ctx.reply("❌ LLM provider not available.");
+        return;
+      }
+      const chatId = String(ctx.chat.id);
+      const numChatId = ctx.chat.id;
+      await ctx.api.sendChatAction(numChatId, "typing").catch(() => {});
+      try {
+        await this.provider.chatStream({
+          messages: [{ role: "user", content: prompt }],
+          onDelta: async (delta: string) => {
+            await this.handleStreamDelta(numChatId, chatId, delta);
+          },
+        });
+        await this.finalizeStream(numChatId, chatId);
+      } catch (err) {
+        await ctx.reply(`❌ ${err instanceof Error ? err.message : String(err)}`);
+      }
     });
 
     this.bot.command(["new", "stop", "dream", "status"], async (ctx) => {
@@ -332,6 +363,7 @@ export class TelegramChannel implements BaseChannel {
       { command: "dream", description: "Run memory consolidation" },
       { command: "status", description: "Show session info" },
       { command: "gemini", description: "Query Gemini directly" },
+      { command: "btw", description: "Raw LLM query (no memory, no context)" },
       { command: "help", description: "Show help" },
     ]);
     this.bot.start({ onStart: (info) => console.log(`[Telegram] Bot @${info.username} connected`) });

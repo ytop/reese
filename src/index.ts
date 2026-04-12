@@ -76,7 +76,8 @@ async function main() {
     const telegram = new TelegramChannel(
       config.telegramBotToken,
       bus,
-      config.telegramAllowFrom
+      config.telegramAllowFrom,
+      provider,
     );
     
     // Initialize Gemini handler with OAuth
