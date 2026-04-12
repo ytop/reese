@@ -86,7 +86,18 @@ export class AgentRunner {
 
       // Handle tool calls
       if (response.toolCalls.length > 0) {
-        logger.info("Tools", `Executing ${response.toolCalls.length} tool(s): ${response.toolCalls.map(tc => tc.name).join(", ")}`);
+        const toolDetails = response.toolCalls.map(tc => {
+          const args = tc.arguments as Record<string, unknown>;
+          if (tc.name === "read_file" && args.path) return `${tc.name}(${args.path})`;
+          if (tc.name === "list_dir" && args.path) return `${tc.name}(${args.path})`;
+          if (tc.name === "exec" && args.command) {
+            const cmd = String(args.command);
+            const short = cmd.length > 50 ? cmd.slice(0, 50) + "..." : cmd;
+            return `${tc.name}(${short})`;
+          }
+          return tc.name;
+        }).join(", ");
+        logger.info("Tools", `Executing ${response.toolCalls.length} tool(s): ${toolDetails}`);
         
         if (hook.wantsStreaming()) await hook.onStreamEnd(true);
         await hook.beforeExecuteTools(ctx);
