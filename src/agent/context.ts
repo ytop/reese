@@ -4,7 +4,7 @@ import { MemoryStore } from "./memory.js";
 import { SkillsLoader } from "./skills.js";
 import type { ChatMessage } from "../providers/base.js";
 
-const BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md"];
+const BOOTSTRAP_FILES = ["USER.md"];
 const MAX_RECENT_HISTORY = 50;
 const RUNTIME_TAG = "[Runtime Context]";
 
@@ -64,10 +64,16 @@ export class ContextBuilder {
   private buildIdentity(channel?: string): string {
     const now = new Date().toLocaleString("en-US", { timeZoneName: "short" });
     return (
-      `You are Reese, a personal AI agent running locally on this machine.\n` +
+      `You are Reese, a personal AI assistant.\n` +
       `Current time: ${now}\n` +
       `Channel: ${channel ?? "cli"}\n` +
       `Workspace: ${this.workspaceDir}\n\n` +
+      `## Core Principles\n` +
+      `- Be helpful, honest, and direct\n` +
+      `- Use tools proactively to get things done\n` +
+      `- Store important facts in memory files\n` +
+      `- Load skill files when you need specialized guidance\n` +
+      `- Keep responses concise unless detail is needed\n\n` +
       `You can use tools to read/write files, execute shell commands, search the web, ` +
       `and more. You have a persistent memory system — important facts are stored in ` +
       `markdown files in the workspace. Skills are instruction files that teach you ` +

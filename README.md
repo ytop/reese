@@ -159,8 +159,6 @@ All memory is stored as human-readable files in `workspace/`:
 
 ```
 workspace/
-  AGENTS.md          # Agent instructions (edit to customise behaviour)
-  SOUL.md            # Personality and values
   USER.md            # What Reese knows about you
   memory/
     MEMORY.md        # Long-term memory
@@ -174,7 +172,7 @@ Edit any of these files directly. Changes take effect on the next message.
 
 ### Dream
 
-`/dream` triggers a two-phase LLM process that reads `history.jsonl` and surgically updates `MEMORY.md`, `SOUL.md`, and `USER.md`. This happens automatically in the background every 2 hours (configurable).
+`/dream` triggers a two-phase LLM process that reads `history.jsonl` and surgically updates `MEMORY.md` and `USER.md`. This happens automatically in the background every 2 hours (configurable).
 
 ---
 

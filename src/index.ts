@@ -141,28 +141,6 @@ async function main() {
 }
 
 function bootstrapWorkspace(paths: ReturnType<typeof ensureWorkspace>) {
-  if (!existsSync(paths.soulFile)) {
-    writeFileSync(
-      paths.soulFile,
-      `# Soul\n\nYou are Reese, a personal AI agent. You are helpful, direct, and thoughtful.\n` +
-      `You remember context across conversations and learn from your interactions.\n`,
-      "utf-8"
-    );
-  }
-  if (!existsSync(paths.agentsFile)) {
-    writeFileSync(
-      paths.agentsFile,
-      `# Reese Agent Instructions\n\n` +
-      `You are Reese, a personal AI assistant.\n\n` +
-      `## Core Principles\n` +
-      `- Be helpful, honest, and direct\n` +
-      `- Use tools proactively to get things done\n` +
-      `- Store important facts in memory files\n` +
-      `- Load skill files when you need specialized guidance\n` +
-      `- Keep responses concise unless detail is needed\n`,
-      "utf-8"
-    );
-  }
   if (!existsSync(paths.memoryFile)) {
     writeFileSync(paths.memoryFile, `# Memory\n\n(No memories yet)\n`, "utf-8");
   }
