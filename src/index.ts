@@ -27,6 +27,7 @@ reese — Personal AI Agent
 Usage:
   reese              Launch the interactive TUI
   reese gateway      Start the gateway (Telegram bot)
+  reese supervisor   Start the supervisor (manages gateway via Telegram)
 
 Environment:
   Copy .env.example to .env and fill in your settings.
@@ -66,6 +67,12 @@ async function main() {
   heartbeat.start();
 
   const mode = args[0];
+
+  if (mode === "supervisor") {
+    // Supervisor mode - manages gateway lifecycle
+    const { default: supervisor } = await import("./supervisor.js");
+    return;
+  }
 
   if (mode === "gateway") {
     // Gateway mode (Telegram)

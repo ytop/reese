@@ -120,16 +120,34 @@ export class TelegramChannel implements BaseChannel {
       await ctx.reply(`👋 Hi! I'm Reese, your personal AI agent.\nSend me a message or /help to see commands.`);
     });
 
+    this.bot.command("gateway", async (ctx) => {
+      if (!this.isAllowed(ctx)) return;
+      const isSupervisorMode = process.env.SUPERVISOR_MODE === "1";
+      if (!isSupervisorMode) {
+        await ctx.reply("⚠️ Gateway restart is only available in supervisor mode.\nRun: `reese supervisor`");
+        return;
+      }
+      // Signal supervisor to restart
+      const { writeFileSync } = await import("node:fs");
+      const { resolve } = await import("node:path");
+      const { loadConfig } = await import("../config/schema.js");
+      const config = loadConfig();
+      const RESTART_FLAG = resolve(config.workspaceDir, ".gateway.restart");
+      writeFileSync(RESTART_FLAG, "1", "utf-8");
+      await ctx.reply("🔄 Restart signal sent. Gateway will restart shortly...");
+    });
+
     this.bot.command("help", async (ctx) => {
       await ctx.reply(
         "Commands:\n" +
         "/new — start a new conversation\n" +
-        "/stop — cancel current task\n" +
+        "/end — cancel current task\n" +
         "/dream — run memory consolidation\n" +
         "/status — show session info\n" +
         "/gemini <prompt> — query Gemini directly\n" +
         "/btw <message> — raw LLM query (no memory, no context)\n" +
         "/double <message> — parallel dual-agent with cross-review\n" +
+        "/gateway — restart gateway (supervisor mode only)\n" +
         "/help — show this message"
       );
     });
@@ -184,7 +202,7 @@ export class TelegramChannel implements BaseChannel {
       }
     });
 
-    this.bot.command(["new", "stop", "dream", "status", "double"], async (ctx) => {
+    this.bot.command(["new", "end", "dream", "status", "double"], async (ctx) => {
       if (!this.isAllowed(ctx)) return;
       const chatId = String(ctx.chat.id);
       const senderId = ctx.from ? String(ctx.from.id) : chatId;
@@ -361,12 +379,13 @@ export class TelegramChannel implements BaseChannel {
     await this.bot.api.setMyCommands([
       { command: "start", description: "Start the bot" },
       { command: "new", description: "New conversation" },
-      { command: "stop", description: "Stop current task" },
+      { command: "end", description: "Stop current task" },
       { command: "dream", description: "Run memory consolidation" },
       { command: "status", description: "Show session info" },
       { command: "gemini", description: "Query Gemini directly" },
       { command: "btw", description: "Raw LLM query (no memory, no context)" },
       { command: "double", description: "Parallel dual-agent with cross-review" },
+      { command: "gateway", description: "Restart gateway (supervisor mode)" },
       { command: "help", description: "Show help" },
     ]);
     this.bot.start({ onStart: (info) => console.log(`[Telegram] Bot @${info.username} connected`) });

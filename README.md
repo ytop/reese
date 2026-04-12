@@ -5,6 +5,7 @@ A personal AI agent that runs locally. Chat in the terminal or connect via Teleg
 ```
 reese              # open the TUI
 reese gateway      # start the Telegram gateway
+reese supervisor   # start the supervisor (manages gateway via Telegram)
 ```
 
 ---
@@ -84,6 +85,40 @@ Starts a long-polling Telegram bot. Create a bot via [@BotFather](https://t.me/B
 
 **Logging:** When running in gateway mode, all major agent events (messages received, LLM calls, tool executions, errors) are logged to `workspace/agent.log` and sent to Telegram. Configure `TELEGRAM_LOG_CHAT_ID` to specify which chat receives logs, or it defaults to the first user in `TELEGRAM_ALLOW_FROM`.
 
+**Note:** In standalone gateway mode, the `/gateway` restart command is not available. Use supervisor mode for gateway restart capability.
+
+### Supervisor — Gateway lifecycle management
+
+```bash
+reese supervisor
+```
+
+Starts a supervisor that manages the gateway as a child process. The supervisor enables the `/gateway` command in Telegram to restart the gateway without stopping the bot.
+
+**How it works:**
+1. Supervisor spawns gateway as a child process
+2. When you send `/gateway` in Telegram, the gateway writes a restart flag file
+3. Supervisor detects the flag and restarts the gateway process
+4. Connection drops for ~1-2 seconds during restart
+5. Gateway comes back online automatically
+
+**Additional supervisor features:**
+- Auto-restarts gateway if it crashes
+- Sends crash notifications to Telegram
+- Provides `/status`, `/stop`, `/start` commands (via supervisor, not gateway)
+
+**Production deployment (Ubuntu/systemd):**
+
+```bash
+./install-supervisor.sh
+```
+
+This installs the supervisor as a systemd service that starts on boot. View logs with:
+
+```bash
+journalctl -u reese-supervisor -f
+```
+
 ---
 
 ## Commands
@@ -93,7 +128,7 @@ These work in both TUI and Telegram:
 | Command | Description |
 |---|---|
 | `/new` | Start a new conversation (clears session history) |
-| `/stop` | Stop the current task |
+| `/end` | Stop the current task |
 | `/dream` | Run memory consolidation now |
 | `/status` | Show current session info |
 | `/gemini <prompt>` | Query Gemini directly (Telegram only) |

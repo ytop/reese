@@ -188,7 +188,7 @@ export class AgentLoop {
       return { channel: msg.channel, chatId: msg.chatId, content: "Started a new conversation." };
     }
 
-    if (cmd === "/stop") {
+    if (cmd === "/end" || cmd === "/stop") {
       return { channel: msg.channel, chatId: msg.chatId, content: "Stop requested." };
     }
 
@@ -235,7 +235,7 @@ export class AgentLoop {
         content:
           "Available commands:\n" +
           "/new — start a new conversation\n" +
-          "/stop — cancel current task\n" +
+          "/end — cancel current task\n" +
           "/think <question> — use advanced model for difficult tasks\n" +
           "/double <message> — parallel dual-agent with cross-review\n" +
           "/dream — run memory consolidation now\n" +

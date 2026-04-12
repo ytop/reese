@@ -1,0 +1,15 @@
+[Unit]
+Description=Reese Gateway Supervisor
+After=network.target
+
+[Service]
+Type=simple
+User=%USER%
+WorkingDirectory=%WORKDIR%
+ExecStart=%BUN% run src/index.ts supervisor
+Restart=always
+RestartSec=5
+EnvironmentFile=%WORKDIR%/.env
+
+[Install]
+WantedBy=multi-user.target
