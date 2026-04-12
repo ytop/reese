@@ -16,7 +16,7 @@ reese supervisor   # start the supervisor (manages gateway via Telegram)
 
 ```bash
 # clone
-git clone <your-repo-url> reese
+git clone https://github.com/ytop/reese.git
 cd reese
 
 # install dependencies
