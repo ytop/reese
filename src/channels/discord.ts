@@ -50,7 +50,7 @@ export class DiscordChannel implements BaseChannel {
   }
 
   private setupHandlers(): void {
-    this.client.on("ready", () => {
+    this.client.on("clientReady", () => {
       console.log(`[Discord] Bot ${this.client.user?.tag} connected`);
     });
 
