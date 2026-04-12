@@ -7,7 +7,7 @@ import { AgentRunner } from "./runner.js";
 import { ContextBuilder } from "./context.js";
 import { Consolidator, Dream } from "./memory.js";
 import { AgentHook, CompositeHook, stripThink } from "./hook.js";
-import { SessionManager } from "../session/manager.js";
+import { SessionManager, type Session } from "../session/manager.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { ReadFileTool, WriteFileTool, EditFileTool, ListDirTool } from "../tools/filesystem.js";
 import { ExecTool } from "../tools/shell.js";
@@ -201,6 +201,15 @@ export class AgentLoop {
       return null; // Continue to processMessage with think mode
     }
 
+    if (cmd === "/double") {
+      const userMessage = raw.slice(7).trim();
+      if (!userMessage) {
+        return { channel: msg.channel, chatId: msg.chatId, content: "Usage: /double <your message>" };
+      }
+      await this.handleDoubleCommand(userMessage, msg, sessionKey);
+      return null;
+    }
+
     if (cmd === "/dream") {
       const did = await this.dream.run();
       return {
@@ -228,6 +237,7 @@ export class AgentLoop {
           "/new — start a new conversation\n" +
           "/stop — cancel current task\n" +
           "/think <question> — use advanced model for difficult tasks\n" +
+          "/double <message> — parallel dual-agent with cross-review\n" +
           "/dream — run memory consolidation now\n" +
           "/status — show session info\n" +
           "/help — show this help",
@@ -235,6 +245,143 @@ export class AgentLoop {
     }
 
     return null;
+  }
+
+  // ── Core processing ─────────────────────────────────────────────────────────
+
+  private async handleDoubleCommand(
+    userMessage: string,
+    msg: InboundMessage,
+    sessionKey: string
+  ): Promise<void> {
+    const logger = Logger.get();
+    
+    // Main session (default model)
+    const mainSession = this.sessions.getOrCreate(sessionKey);
+    const secondarySessionKey = `${sessionKey}:secondary`;
+    const secondarySession = this.sessions.getOrCreate(secondarySessionKey);
+
+    // Run both agents in parallel
+    const [mainResult, thinkResult] = await Promise.all([
+      this.runAgent(userMessage, msg, mainSession, this.provider, this.config.modelName, "Main"),
+      this.runAgent(userMessage, msg, secondarySession, this.thinkProvider || this.provider, this.config.thinkModelName || this.config.modelName, "Think"),
+    ]);
+
+    // Send initial responses
+    this.bus.publishOutbound({
+      channel: msg.channel,
+      chatId: msg.chatId,
+      content: `🤖 Main Agent:\n${mainResult}`,
+    });
+    this.bus.publishOutbound({
+      channel: msg.channel,
+      chatId: msg.chatId,
+      content: `🧠 Think Agent:\n${thinkResult}`,
+    });
+
+    // Cross-review: Main reviews Think
+    const mainReview = await this.runCrossReview(
+      mainResult,
+      thinkResult,
+      mainSession,
+      this.provider,
+      this.config.modelName,
+      "Main"
+    );
+    this.bus.publishOutbound({
+      channel: msg.channel,
+      chatId: msg.chatId,
+      content: `🤖 Main Agent Review:\n${mainReview}`,
+    });
+
+    // Cross-review: Think reviews Main
+    const thinkReview = await this.runCrossReview(
+      thinkResult,
+      mainResult,
+      secondarySession,
+      this.thinkProvider || this.provider,
+      this.config.thinkModelName || this.config.modelName,
+      "Think"
+    );
+    this.bus.publishOutbound({
+      channel: msg.channel,
+      chatId: msg.chatId,
+      content: `🧠 Think Agent Review:\n${thinkReview}`,
+    });
+
+    logger.info("Double", "Cross-review complete");
+  }
+
+  private async runAgent(
+    userMessage: string,
+    msg: InboundMessage,
+    session: Session,
+    provider: LLMProvider,
+    model: string,
+    agentName: string
+  ): Promise<string> {
+    const messages = this.context.buildCompactMessages(session.compactContext, userMessage, {
+      channel: msg.channel,
+      chatId: msg.chatId,
+    });
+
+    const result = await this.runner.run({
+      initialMessages: messages,
+      tools: this.tools,
+      model,
+      maxIterations: this.config.maxIterations,
+      maxToolResultChars: this.config.maxToolResultChars,
+      provider,
+    });
+
+    const rawContent = result.finalContent ?? "";
+    const { reply, compactContext } = parseCompactResponse(rawContent);
+
+    session.compactContext = compactContext || session.compactContext;
+    session.messages.push(
+      { role: "user", content: userMessage },
+      { role: "assistant", content: reply }
+    );
+    this.sessions.save(session);
+
+    return reply || "(no response)";
+  }
+
+  private async runCrossReview(
+    ownResponse: string,
+    otherResponse: string,
+    session: Session,
+    provider: LLMProvider,
+    model: string,
+    agentName: string
+  ): Promise<string> {
+    const reviewPrompt = `Review: ${otherResponse}`;
+    
+    const messages = this.context.buildCompactMessages(session.compactContext, reviewPrompt, {
+      channel: "system",
+      chatId: "review",
+    });
+
+    const result = await this.runner.run({
+      initialMessages: messages,
+      tools: this.tools,
+      model,
+      maxIterations: Math.floor(this.config.maxIterations / 2),
+      maxToolResultChars: this.config.maxToolResultChars,
+      provider,
+    });
+
+    const rawContent = result.finalContent ?? "";
+    const { reply, compactContext } = parseCompactResponse(rawContent);
+
+    session.compactContext = compactContext || session.compactContext;
+    session.messages.push(
+      { role: "user", content: reviewPrompt },
+      { role: "assistant", content: reply }
+    );
+    this.sessions.save(session);
+
+    return reply || "(no review)";
   }
 
   // ── Core processing ─────────────────────────────────────────────────────────

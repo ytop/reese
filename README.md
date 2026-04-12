@@ -97,6 +97,7 @@ These work in both TUI and Telegram:
 | `/dream` | Run memory consolidation now |
 | `/status` | Show current session info |
 | `/gemini <prompt>` | Query Gemini directly (Telegram only) |
+| `/double <message>` | Parallel dual-agent with cross-review (Telegram only) |
 | `/help` | Show available commands |
 
 ### Gemini Integration
@@ -127,6 +128,28 @@ Reese includes optional Gemini API integration for direct queries via Telegram. 
    ```
 
 The Gemini integration uses OAuth authentication from your external Gemini login. The token is read from the workspace config file and cached automatically. See [src/gemini/README.md](./src/gemini/README.md) for details.
+
+### Double Agent Mode
+
+The `/double` command runs two AI agents in parallel (default model and think model) and performs cross-review:
+
+1. Both agents process your message independently
+2. Each agent's response is sent to Telegram with a label (🤖 Main Agent, 🧠 Think Agent)
+3. Each agent reviews the other's response
+4. Both reviews are sent to Telegram
+
+This provides diverse perspectives and quality control through peer review. Each agent maintains its own session file:
+- Main session: `workspace/sessions/telegram_{chatId}.json`
+- Secondary session: `workspace/sessions/telegram_{chatId}_secondary.json`
+
+Configure the think model in `.env`:
+```env
+THINK_MODEL_API_KEY=sk-...
+THINK_MODEL_API_BASE=https://api.openai.com/v1
+THINK_MODEL_NAME=o1-preview
+```
+
+If not configured, both agents use the default model.
 
 ---
 

@@ -129,6 +129,7 @@ export class TelegramChannel implements BaseChannel {
         "/status — show session info\n" +
         "/gemini <prompt> — query Gemini directly\n" +
         "/btw <message> — raw LLM query (no memory, no context)\n" +
+        "/double <message> — parallel dual-agent with cross-review\n" +
         "/help — show this message"
       );
     });
@@ -183,15 +184,16 @@ export class TelegramChannel implements BaseChannel {
       }
     });
 
-    this.bot.command(["new", "stop", "dream", "status"], async (ctx) => {
+    this.bot.command(["new", "stop", "dream", "status", "double"], async (ctx) => {
       if (!this.isAllowed(ctx)) return;
       const chatId = String(ctx.chat.id);
       const senderId = ctx.from ? String(ctx.from.id) : chatId;
+      const text = ctx.message?.text ?? "";
       this.bus.publishInbound({
         channel: "telegram",
         senderId,
         chatId,
-        content: `/${String(ctx.message?.text ?? "").split(" ")[0]?.replace(/^\//, "").split("@")[0] ?? "help"}`,
+        content: text,
         timestamp: new Date(),
         metadata: { message_id: ctx.message?.message_id },
       });
@@ -364,6 +366,7 @@ export class TelegramChannel implements BaseChannel {
       { command: "status", description: "Show session info" },
       { command: "gemini", description: "Query Gemini directly" },
       { command: "btw", description: "Raw LLM query (no memory, no context)" },
+      { command: "double", description: "Parallel dual-agent with cross-review" },
       { command: "help", description: "Show help" },
     ]);
     this.bot.start({ onStart: (info) => console.log(`[Telegram] Bot @${info.username} connected`) });
