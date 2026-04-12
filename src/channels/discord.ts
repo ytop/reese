@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, type Message } from "discord.js";
+import { Client, GatewayIntentBits, Partials, type Message } from "discord.js";
 import type { MessageBus } from "../bus/queue.js";
 import type { BaseChannel } from "./base.js";
 
@@ -34,6 +34,10 @@ export class DiscordChannel implements BaseChannel {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+      ],
+      partials: [
+        Partials.Channel,   // Required: DM channels are not cached by default
+        Partials.Message,   // Required: DM messages may arrive as partial
       ],
     });
     this.allowFrom = new Set(allowFrom);
