@@ -1,7 +1,7 @@
 import { config as dotenvConfig } from "dotenv";
 import { z } from "zod";
-import { resolve } from "node:path";
-
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
 dotenvConfig();
 
 const ConfigSchema = z.object({
@@ -16,7 +16,7 @@ const ConfigSchema = z.object({
   TELEGRAM_LOG_CHAT_ID: z.string().optional(), // chat ID to send logs to
   DISCORD_BOT_TOKEN: z.string().optional(),
   DISCORD_ALLOW_FROM: z.string().optional(), // comma-separated
-  WORKSPACE_DIR: z.string().default("./workspace"),
+  WORKSPACE_DIR: z.string().default(join(homedir(), ".reese", "workspace")),
   MAX_ITERATIONS: z.coerce.number().int().positive().default(50),
   MAX_TOKENS: z.coerce.number().int().positive().default(8192),
   CONTEXT_WINDOW_TOKENS: z.coerce.number().int().positive().default(65536),
@@ -67,7 +67,7 @@ export function loadConfig(): AppConfig {
     discordAllowFrom: raw.DISCORD_ALLOW_FROM
       ? raw.DISCORD_ALLOW_FROM.split(",").map((s) => s.trim()).filter(Boolean)
       : [],
-    workspaceDir: resolve(raw.WORKSPACE_DIR),
+    workspaceDir: resolve(raw.WORKSPACE_DIR.replace(/^~(?=$|\/|\\)/, homedir())),
     maxIterations: raw.MAX_ITERATIONS,
     maxTokens: raw.MAX_TOKENS,
     contextWindowTokens: raw.CONTEXT_WINDOW_TOKENS,

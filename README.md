@@ -62,7 +62,7 @@ DISCORD_BOT_TOKEN=
 DISCORD_ALLOW_FROM=user_id1,user_id2
 
 # Workspace directory (stores memory, sessions, skills)
-WORKSPACE_DIR=./workspace
+# WORKSPACE_DIR=~/.reese/workspace
 ```
 
 **Compatible providers:** OpenAI, Anthropic (via OpenAI proxy), Ollama, LM Studio, OpenRouter, Groq, any OpenAI-compatible endpoint.
@@ -89,7 +89,7 @@ reese gateway
 
 Starts a long-polling Telegram bot. Create a bot via [@BotFather](https://t.me/BotFather), set `TELEGRAM_BOT_TOKEN` in `.env`, and optionally restrict access with `TELEGRAM_ALLOW_FROM`.
 
-**Logging:** When running in gateway mode, all major agent events (messages received, LLM calls, tool executions, errors) are logged to `workspace/agent.log` and sent to Telegram. Configure `TELEGRAM_LOG_CHAT_ID` to specify which chat receives logs, or it defaults to the first user in `TELEGRAM_ALLOW_FROM`.
+**Logging:** When running in gateway mode, all major agent events (messages received, LLM calls, tool executions, errors) are logged to `~/.reese/workspace/agent.log` and sent to Telegram. Configure `TELEGRAM_LOG_CHAT_ID` to specify which chat receives logs, or it defaults to the first user in `TELEGRAM_ALLOW_FROM`.
 
 
 ### Supervisor — Gateway lifecycle management
@@ -147,8 +147,8 @@ The `/double` command runs two AI agents in parallel (default model and think mo
 4. Both reviews are sent to Telegram
 
 This provides diverse perspectives and quality control through peer review. Each agent maintains its own session file:
-- Main session: `workspace/sessions/telegram_{chatId}.json`
-- Secondary session: `workspace/sessions/telegram_{chatId}_secondary.json`
+- Main session: `~/.reese/workspace/sessions/telegram_{chatId}.json`
+- Secondary session: `~/.reese/workspace/sessions/telegram_{chatId}_secondary.json`
 
 Configure the think model in `.env`:
 ```env
@@ -163,10 +163,10 @@ If not configured, both agents use the default model.
 
 ## Memory
 
-All memory is stored as human-readable files in `workspace/`:
+All memory is stored as human-readable files in `~/.reese/workspace/`:
 
 ```
-workspace/
+~/.reese/workspace/
   USER.md            # What Reese knows about you
   memory/
     MEMORY.md        # Long-term memory
@@ -193,8 +193,8 @@ Skills are markdown instruction files that teach Reese how to perform specific t
 **Add your own:**
 
 ```bash
-mkdir -p workspace/skills/my-skill
-cat > workspace/skills/my-skill/SKILL.md << 'EOF'
+mkdir -p ~/.reese/workspace/skills/my-skill
+cat > ~/.reese/workspace/skills/my-skill/SKILL.md << 'EOF'
 ---
 name: my-skill
 description: What this skill does
@@ -243,5 +243,5 @@ src/
   session/          conversation persistence
   tools/            all agent tools
 skills/             built-in skills
-workspace/          your data (gitignored)
+~/.reese/workspace/  your data
 ```
