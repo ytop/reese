@@ -182,6 +182,41 @@ client.on(Events.MessageCreate, async (msg) => {
       break;
     }
 
+    case "gemini": {
+      const geminiPrompt = msg.content.slice(PREFIX.length).trim().slice("gemini".length).trim();
+      if (!geminiPrompt) {
+        await msg.reply("⚠️ Usage: `!gemini <prompt>`");
+        break;
+      }
+      const geminiModel =
+        geminiPrompt.length > 80 ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
+      await msg.react("⏳");
+      try {
+        const geminiProc = Bun.spawn(["gemini", "--model", geminiModel, "-p", geminiPrompt], {
+          cwd: REPO_ROOT,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const [geminiStdout, geminiStderr, geminiExit] = await Promise.all([
+          new Response(geminiProc.stdout).text(),
+          new Response(geminiProc.stderr).text(),
+          geminiProc.exited,
+        ]);
+        const geminiCombined = [geminiStdout, geminiStderr].filter(Boolean).join("\n").trim();
+        const MAX = 1900;
+        const geminiTruncated = geminiCombined.length > MAX
+          ? geminiCombined.slice(0, MAX) + "\n…(truncated)"
+          : geminiCombined || "_(no output)_";
+        const geminiStatus = geminiExit === 0 ? "✅" : `❌ (exit ${geminiExit})`;
+        await msg.reply(
+          `${geminiStatus} \`gemini\` [\`${geminiModel}\`]\n\`\`\`\n${geminiTruncated}\n\`\`\``
+        );
+      } catch (err: unknown) {
+        await msg.reply(`❌ Failed to run gemini: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      break;
+    }
+
     case "shell": {
       const shellCmd = msg.content.slice(PREFIX.length).trim().slice("shell".length).trim();
       if (!shellCmd) {
@@ -221,7 +256,8 @@ client.on(Events.MessageCreate, async (msg) => {
         "`!stop` — stop gateway\n" +
         "`!restart` — restart gateway\n" +
         "`!upgrade` — stop gateway, git pull, restart gateway\n" +
-        "`!shell <cmd>` — run shell command from repo root"
+        "`!shell <cmd>` — run shell command from repo root\n" +
+        "`!gemini <prompt>` — ask Gemini (flash for ≤80 chars, pro for longer)"
       );
       break;
   }
