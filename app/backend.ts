@@ -1,6 +1,9 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
-const DATA_FILE = '../workspace/calendar/events.json';
+const DIR = join(homedir(), '.reese/workspace/calendar');
+const DATA_FILE = join(DIR, 'events.json');
 
 export interface Event {
   id: string;
@@ -10,7 +13,10 @@ export interface Event {
 }
 
 const load = (): Event[] => existsSync(DATA_FILE) ? JSON.parse(readFileSync(DATA_FILE, 'utf-8')) : [];
-const save = (events: Event[]) => writeFileSync(DATA_FILE, JSON.stringify(events, null, 2));
+const save = (events: Event[]) => {
+  if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true });
+  writeFileSync(DATA_FILE, JSON.stringify(events, null, 2));
+};
 
 export const create = (title: string, date: string, description?: string): Event => {
   const events = load();
