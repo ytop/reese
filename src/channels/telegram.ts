@@ -144,34 +144,12 @@ export class TelegramChannel implements BaseChannel {
         "/end — cancel current task\n" +
         "/dream — run memory consolidation\n" +
         "/status — show session info\n" +
-        "/gemini <prompt> — query Gemini directly\n" +
+
         "/btw <message> — raw LLM query (no memory, no context)\n" +
         "/double <message> — parallel dual-agent with cross-review\n" +
         "/gateway — restart gateway (supervisor mode only)\n" +
         "/help — show this message"
       );
-    });
-
-    this.bot.command("gemini", async (ctx) => {
-      if (!this.isAllowed(ctx)) return;
-      const chatId = String(ctx.chat.id);
-      const senderId = ctx.from ? String(ctx.from.id) : chatId;
-      const text = ctx.message?.text ?? "";
-      const prompt = text.replace(/^\/gemini(@\w+)?\s*/, "").trim();
-      
-      if (!prompt) {
-        await ctx.reply("Usage: /gemini <your question>");
-        return;
-      }
-
-      // Show typing indicator
-      await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
-
-      // Emit gemini request event
-      this.bus.emit("gemini:request", {
-        prompt,
-        replyTo: { chatId, senderId, messageId: ctx.message?.message_id },
-      });
     });
 
     this.bot.command("btw", async (ctx) => {
@@ -254,31 +232,6 @@ export class TelegramChannel implements BaseChannel {
       });
     });
 
-    // Listen for gemini streaming
-    this.bus.on("gemini:chunk", async (data: any) => {
-      const { chunk, replyTo } = data;
-      if (!replyTo) return;
-      const numChatId = parseInt(replyTo.chatId, 10);
-      await this.handleStreamDelta(numChatId, replyTo.chatId, chunk);
-    });
-
-    this.bus.on("gemini:done", async (data: any) => {
-      const { replyTo } = data;
-      if (!replyTo) return;
-      const numChatId = parseInt(replyTo.chatId, 10);
-      await this.finalizeStream(numChatId, replyTo.chatId);
-    });
-
-    this.bus.on("gemini:response", async (data: any) => {
-      const { content, error, replyTo } = data;
-      if (!replyTo || !error) return;
-      const numChatId = parseInt(replyTo.chatId, 10);
-      try {
-        await this.bot.api.sendMessage(numChatId, `❌ ${content}`);
-      } catch (err) {
-        console.error(`[Telegram] Failed to send gemini error:`, err);
-      }
-    });
   }
 
   private setupOutbound(): void {
@@ -382,7 +335,6 @@ export class TelegramChannel implements BaseChannel {
       { command: "end", description: "Stop current task" },
       { command: "dream", description: "Run memory consolidation" },
       { command: "status", description: "Show session info" },
-      { command: "gemini", description: "Query Gemini directly" },
       { command: "btw", description: "Raw LLM query (no memory, no context)" },
       { command: "double", description: "Parallel dual-agent with cross-review" },
       { command: "gateway", description: "Restart gateway (supervisor mode)" },
