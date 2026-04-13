@@ -1,29 +1,59 @@
 #!/usr/bin/env bun
 import { spawn, type Subprocess } from "bun";
-import { Bot } from "grammy";
+import { Client, GatewayIntentBits, Partials, Events, type Message } from "discord.js";
 import { loadConfig } from "./config/schema.js";
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
+import { writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 
 const config = loadConfig();
 
-if (!config.telegramBotToken) {
-  console.error("❌ TELEGRAM_BOT_TOKEN is not set in .env");
+if (!config.discordBotToken) {
+  console.error("❌ DISCORD_BOT_TOKEN is not set in .env — Supervisor requires Discord.");
   process.exit(1);
 }
 
 const PID_FILE = resolve(config.workspaceDir, ".gateway.pid");
 const RESTART_FLAG = resolve(config.workspaceDir, ".gateway.restart");
 
-const bot = new Bot(config.telegramBotToken);
-const allowFrom = new Set(config.telegramAllowFrom);
-let gatewayProcess: Subprocess | null = null;
+// ─── Discord client ────────────────────────────────────────────────────────────
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages,
+  ],
+  partials: [Partials.Channel, Partials.Message],
+});
 
-function isAllowed(chatId: number, username?: string): boolean {
+const allowFrom = new Set(config.discordAllowFrom);
+
+function isAllowed(msg: Message): boolean {
   if (!allowFrom.size) return true;
-  const uid = String(chatId);
-  return allowFrom.has(uid) || allowFrom.has(username ?? "") || allowFrom.has("*");
+  return (
+    allowFrom.has(msg.author.id) ||
+    allowFrom.has(msg.author.username) ||
+    allowFrom.has("*")
+  );
 }
+
+async function sendLog(text: string) {
+  // Send a status message to the first allowed Discord user/channel via DM,
+  // or to a configured log channel if DISCORD_LOG_CHANNEL_ID is set.
+  const logChannelId = process.env.DISCORD_LOG_CHANNEL_ID;
+  if (!logChannelId) return;
+  try {
+    const ch = await client.channels.fetch(logChannelId);
+    if (ch?.isTextBased() && "send" in ch) {
+      await ch.send(text);
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+// ─── Gateway process management ────────────────────────────────────────────────
+let gatewayProcess: Subprocess | null = null;
 
 function startGateway() {
   console.log("Starting gateway...");
@@ -59,91 +89,112 @@ function isGatewayRunning(): boolean {
   return gatewayProcess !== null && gatewayProcess.exitCode === null;
 }
 
-// Watch for restart flag from gateway
+// ─── Command handler ───────────────────────────────────────────────────────────
+const PREFIX = "!";
+
+client.on(Events.MessageCreate, async (msg) => {
+  if (msg.author.bot) return;
+  if (!isAllowed(msg)) return;
+  if (!msg.content.startsWith(PREFIX)) return;
+
+  const [cmd] = msg.content.slice(PREFIX.length).trim().split(/\s+/);
+
+  switch (cmd?.toLowerCase()) {
+    case "status":
+      if (isGatewayRunning()) {
+        await msg.reply(`✅ Gateway is **running** (PID: \`${gatewayProcess!.pid}\`)`);
+      } else {
+        await msg.reply("❌ Gateway is **not running**");
+      }
+      break;
+
+    case "start":
+      if (isGatewayRunning()) {
+        await msg.reply("⚠️ Gateway is already running.");
+      } else {
+        startGateway();
+        await msg.reply("▶️ Gateway started.");
+      }
+      break;
+
+    case "stop":
+      if (!isGatewayRunning()) {
+        await msg.reply("⚠️ Gateway is already stopped.");
+      } else {
+        await stopGateway();
+        await msg.reply("🛑 Gateway stopped.");
+      }
+      break;
+
+    case "restart":
+    case "gateway":
+      await msg.reply("🔄 Restarting gateway...\n_Connection will drop briefly._");
+      writeFileSync(RESTART_FLAG, "1", "utf-8");
+      break;
+
+    case "help":
+      await msg.reply(
+        "**Supervisor commands**\n" +
+        "`!status` — check gateway status\n" +
+        "`!start` — start gateway\n" +
+        "`!stop` — stop gateway\n" +
+        "`!restart` — restart gateway"
+      );
+      break;
+  }
+});
+
+// ─── Restart-flag watcher ──────────────────────────────────────────────────────
 async function watchRestartFlag() {
   while (true) {
     if (existsSync(RESTART_FLAG)) {
       console.log("Restart flag detected, restarting gateway...");
       unlinkSync(RESTART_FLAG);
-      const logChatId = config.telegramLogChatId || config.telegramAllowFrom[0];
-      if (logChatId) {
-        await bot.api.sendMessage(parseInt(logChatId), "🔄 Restarting gateway...");
-      }
+      await sendLog("🔄 Restarting gateway...");
       await stopGateway();
       await Bun.sleep(1000);
       startGateway();
       await Bun.sleep(2000);
-      if (logChatId) {
-        await bot.api.sendMessage(parseInt(logChatId), "✅ Gateway restarted successfully!");
-      }
+      await sendLog("✅ Gateway restarted successfully!");
     }
     await Bun.sleep(500);
   }
 }
 
-bot.command("gateway", async (ctx) => {
-  if (!isAllowed(ctx.chat.id, ctx.from?.username)) return;
-  await ctx.reply("🔄 Restarting gateway...\n_Connection will drop briefly._", { parse_mode: "Markdown" });
-  writeFileSync(RESTART_FLAG, "1", "utf-8");
-});
-
-bot.command("status", async (ctx) => {
-  if (!isAllowed(ctx.chat.id, ctx.from?.username)) return;
-  if (isGatewayRunning()) {
-    await ctx.reply(`✅ Gateway is *running* (PID: \`${gatewayProcess!.pid}\`)`, { parse_mode: "Markdown" });
-  } else {
-    await ctx.reply("❌ Gateway is *not running*", { parse_mode: "Markdown" });
-  }
-});
-
-bot.command("stop", async (ctx) => {
-  if (!isAllowed(ctx.chat.id, ctx.from?.username)) return;
-  if (!isGatewayRunning()) return ctx.reply("⚠️ Gateway is already stopped.");
-  await stopGateway();
-  await ctx.reply("🛑 Gateway stopped.");
-});
-
-bot.command("start", async (ctx) => {
-  if (!isAllowed(ctx.chat.id, ctx.from?.username)) return;
-  if (isGatewayRunning()) return ctx.reply("⚠️ Gateway is already running.");
-  startGateway();
-  await ctx.reply("▶️ Gateway started.");
-});
-
+// ─── Auto-restart watcher ──────────────────────────────────────────────────────
 async function watchGateway() {
   while (true) {
     if (gatewayProcess && !isGatewayRunning()) {
       console.warn("Gateway crashed! Auto-restarting in 3s...");
-      const logChatId = config.telegramLogChatId || config.telegramAllowFrom[0];
-      if (logChatId) {
-        await bot.api.sendMessage(parseInt(logChatId), "⚠️ Gateway crashed — auto-restarting...");
-      }
+      await sendLog("⚠️ Gateway crashed — auto-restarting...");
       await Bun.sleep(3000);
       startGateway();
       await Bun.sleep(2000);
-      if (logChatId) {
-        await bot.api.sendMessage(parseInt(logChatId), "✅ Gateway auto-restarted.");
-      }
+      await sendLog("✅ Gateway auto-restarted.");
     }
     await Bun.sleep(5000);
   }
 }
 
+// ─── Lifecycle ─────────────────────────────────────────────────────────────────
 process.once("SIGINT", async () => {
   console.log("\n[Supervisor] Shutting down...");
   await stopGateway();
-  await bot.stop();
+  await client.destroy();
   process.exit(0);
 });
 
 process.once("SIGTERM", async () => {
   await stopGateway();
-  await bot.stop();
+  await client.destroy();
   process.exit(0);
 });
 
-startGateway();
-watchGateway();
-watchRestartFlag();
-bot.start();
-console.log("🔧 Supervisor running.");
+client.once(Events.ClientReady, (c) => {
+  console.log(`🔧 Supervisor running (Discord: ${c.user.tag})`);
+  startGateway();
+  watchGateway();
+  watchRestartFlag();
+});
+
+client.login(config.discordBotToken);

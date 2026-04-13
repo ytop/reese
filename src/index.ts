@@ -4,7 +4,8 @@
  *
  * Usage:
  *   reese              → Interactive TUI
- *   reese gateway      → Start gateway (Telegram bot)
+ *   reese gateway      → Start gateway (Telegram bot — only)
+ *   reese supervisor   → Start supervisor (Discord bot — only)
  */
 
 import { loadConfig } from "./config/schema.js";
@@ -75,44 +76,27 @@ async function main() {
   }
 
   if (mode === "gateway") {
-    // Gateway mode with automatic Discord fallback
-    const channels = [];
-    
-    if (config.telegramBotToken) {
-      const { TelegramChannel } = await import("./channels/telegram.js");
-      const telegram = new TelegramChannel(
-        config.telegramBotToken,
-        bus,
-        config.telegramAllowFrom,
-        provider,
-      );
-      channels.push({
+    // Gateway mode — Telegram only
+    if (!config.telegramBotToken) {
+      console.error("❌ TELEGRAM_BOT_TOKEN is not set. Gateway requires Telegram.");
+      process.exit(1);
+    }
+
+    const { TelegramChannel } = await import("./channels/telegram.js");
+    const telegram = new TelegramChannel(
+      config.telegramBotToken,
+      bus,
+      config.telegramAllowFrom,
+      provider,
+    );
+    const channels = [
+      {
         name: "telegram",
         channel: telegram,
         rateLimitWindow: 60000, // 1 minute
         rateLimitMax: 20, // 20 messages per minute
-      });
-    }
-    
-    if (config.discordBotToken) {
-      const { DiscordChannel } = await import("./channels/discord.js");
-      const discord = new DiscordChannel(
-        config.discordBotToken,
-        bus,
-        config.discordAllowFrom,
-      );
-      channels.push({
-        name: "discord",
-        channel: discord,
-        rateLimitWindow: 60000,
-        rateLimitMax: 50,
-      });
-    }
-    
-    if (!channels.length) {
-      console.error("❌ No bot tokens configured. Set TELEGRAM_BOT_TOKEN or DISCORD_BOT_TOKEN in .env");
-      process.exit(1);
-    }
+      },
+    ];
     
     const { ChannelManager } = await import("./channels/manager.js");
     const manager = new ChannelManager(bus, channels);
