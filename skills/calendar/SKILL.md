@@ -7,7 +7,7 @@ description: Manage calendar events using the local calendar app
 
 Use the calendar app located in `./app/` to manage events.
 
-> **Data file:** `~/.reese/workspace/calendar/events.json`
+> **Data file:** `$HOME/.reese/workspace/calendar/events.json`
 
 ## Available Commands
 
