@@ -120,23 +120,6 @@ export class TelegramChannel implements BaseChannel {
       await ctx.reply(`👋 Hi! I'm Reese, your personal AI agent.\nSend me a message or /help to see commands.`);
     });
 
-    this.bot.command("gateway", async (ctx) => {
-      if (!this.isAllowed(ctx)) return;
-      const isSupervisorMode = process.env.SUPERVISOR_MODE === "1";
-      if (!isSupervisorMode) {
-        await ctx.reply("⚠️ Gateway restart is only available in supervisor mode.\nRun: `reese supervisor`");
-        return;
-      }
-      // Signal supervisor to restart
-      const { writeFileSync } = await import("node:fs");
-      const { resolve } = await import("node:path");
-      const { loadConfig } = await import("../config/schema.js");
-      const config = loadConfig();
-      const RESTART_FLAG = resolve(config.workspaceDir, ".gateway.restart");
-      writeFileSync(RESTART_FLAG, "1", "utf-8");
-      await ctx.reply("🔄 Restart signal sent. Gateway will restart shortly...");
-    });
-
     this.bot.command("help", async (ctx) => {
       await ctx.reply(
         "Commands:\n" +
@@ -147,7 +130,6 @@ export class TelegramChannel implements BaseChannel {
 
         "/btw <message> — raw LLM query (no memory, no context)\n" +
         "/double <message> — parallel dual-agent with cross-review\n" +
-        "/gateway — restart gateway (supervisor mode only)\n" +
         "/help — show this message"
       );
     });
@@ -337,7 +319,6 @@ export class TelegramChannel implements BaseChannel {
       { command: "status", description: "Show session info" },
       { command: "btw", description: "Raw LLM query (no memory, no context)" },
       { command: "double", description: "Parallel dual-agent with cross-review" },
-      { command: "gateway", description: "Restart gateway (supervisor mode)" },
       { command: "help", description: "Show help" },
     ]);
     this.bot.start({ onStart: (info) => console.log(`[Telegram] Bot @${info.username} connected`) });

@@ -91,7 +91,6 @@ Starts a long-polling Telegram bot. Create a bot via [@BotFather](https://t.me/B
 
 **Logging:** When running in gateway mode, all major agent events (messages received, LLM calls, tool executions, errors) are logged to `workspace/agent.log` and sent to Telegram. Configure `TELEGRAM_LOG_CHAT_ID` to specify which chat receives logs, or it defaults to the first user in `TELEGRAM_ALLOW_FROM`.
 
-**Note:** In standalone gateway mode, the `/gateway` restart command is not available. Use supervisor mode for gateway restart capability.
 
 ### Supervisor — Gateway lifecycle management
 
@@ -99,14 +98,12 @@ Starts a long-polling Telegram bot. Create a bot via [@BotFather](https://t.me/B
 reese supervisor
 ```
 
-Starts a supervisor that manages the gateway as a child process. The supervisor enables the `/gateway` command in Telegram to restart the gateway without stopping the bot.
+Starts a supervisor that manages the gateway as a child process.
 
 **How it works:**
 1. Supervisor spawns gateway as a child process
-2. When you send `/gateway` in Telegram, the gateway writes a restart flag file
-3. Supervisor detects the flag and restarts the gateway process
-4. Connection drops for ~1-2 seconds during restart
-5. Gateway comes back online automatically
+2. Connection drops for ~1-2 seconds during restart
+3. Gateway comes back online automatically
 
 **Additional supervisor features:**
 - Auto-restarts gateway if it crashes
