@@ -88,6 +88,7 @@ Once the supervisor is running, use these commands in Discord:
 - `!start` — Start the gateway
 - `!stop` — Stop the gateway
 - `!restart` / `!gateway` — Restart the gateway
+- `!upgrade` — Stop gateway → `git pull` → start gateway (each step reported with output)
 - `!shell <cmd>` — Run a shell command from the repo root and return output
 - `!help` — Show all supervisor commands
 

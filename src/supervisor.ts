@@ -134,6 +134,54 @@ client.on(Events.MessageCreate, async (msg) => {
       writeFileSync(RESTART_FLAG, "1", "utf-8");
       break;
 
+    case "upgrade": {
+      await msg.reply("🚀 Starting upgrade sequence...");
+
+      // Step 1: Stop gateway
+      if (isGatewayRunning()) {
+        await msg.reply(`⏹️ Stopping gateway (PID: \`${gatewayProcess!.pid}\`)...`);
+        await stopGateway();
+        await msg.reply("✅ Gateway stopped.");
+      } else {
+        await msg.reply("ℹ️ Gateway was not running — skipping stop.");
+      }
+
+      // Step 2: git pull
+      await msg.reply("📦 Running `git pull`...");
+      try {
+        const pullProc = Bun.spawn(["git", "pull"], {
+          cwd: REPO_ROOT,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const [pullStdout, pullStderr, pullExit] = await Promise.all([
+          new Response(pullProc.stdout).text(),
+          new Response(pullProc.stderr).text(),
+          pullProc.exited,
+        ]);
+        const pullOutput = [pullStdout, pullStderr].filter(Boolean).join("\n").trim();
+        const MAX = 1900;
+        const pullTruncated = pullOutput.length > MAX
+          ? pullOutput.slice(0, MAX) + "\n…(truncated)"
+          : pullOutput || "_(no output)_";
+        if (pullExit === 0) {
+          await msg.reply(`✅ \`git pull\` succeeded (exit 0)\n\`\`\`\n${pullTruncated}\n\`\`\``);
+        } else {
+          await msg.reply(`❌ \`git pull\` failed (exit ${pullExit})\n\`\`\`\n${pullTruncated}\n\`\`\`\n⚠️ Upgrade aborted — gateway was NOT restarted.`);
+          break;
+        }
+      } catch (err: unknown) {
+        await msg.reply(`❌ \`git pull\` threw an error: ${err instanceof Error ? err.message : String(err)}\n⚠️ Upgrade aborted — gateway was NOT restarted.`);
+        break;
+      }
+
+      // Step 3: Start gateway
+      await msg.reply("▶️ Starting gateway...");
+      startGateway();
+      await msg.reply(`✅ Gateway started (PID: \`${gatewayProcess!.pid}\`). Upgrade complete! 🎉`);
+      break;
+    }
+
     case "shell": {
       const shellCmd = msg.content.slice(PREFIX.length).trim().slice("shell".length).trim();
       if (!shellCmd) {
@@ -172,6 +220,7 @@ client.on(Events.MessageCreate, async (msg) => {
         "`!start` — start gateway\n" +
         "`!stop` — stop gateway\n" +
         "`!restart` — restart gateway\n" +
+        "`!upgrade` — stop gateway, git pull, restart gateway\n" +
         "`!shell <cmd>` — run shell command from repo root"
       );
       break;
