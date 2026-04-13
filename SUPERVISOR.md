@@ -79,21 +79,34 @@ sudo systemctl restart reese-supervisor
 sudo systemctl stop reese-supervisor
 ```
 
-## Telegram Commands
+## Discord Commands
 
-Once the supervisor is running, use these commands in Telegram:
+Once the supervisor is running, use these commands in Discord:
 
 **Supervisor control commands:**
-- `/gateway` - Restart the gateway (connection may drop for 1-2 seconds)
-- `/status` - Check if gateway is running (shows PID)
-- `/stop` - Stop the gateway
-- `/start` - Start the gateway
+- `!status` — Check if gateway is running (shows PID)
+- `!start` — Start the gateway
+- `!stop` — Stop the gateway
+- `!restart` / `!gateway` — Restart the gateway
+- `!shell <cmd>` — Run a shell command from the repo root and return output
+- `!help` — Show all supervisor commands
 
 **Agent commands (handled by gateway):**
 - `/new` - Start a new conversation
 - `/end` - Stop the current task
 - `/dream` - Run memory consolidation
 - `/help` - Show available commands
+
+### `!shell` examples
+
+```
+!shell ls -la workspace/
+!shell bun run src/index.ts --help
+!shell git log --oneline -5
+!shell cd app && bun cli.tsx list
+```
+
+Output (stdout + stderr) is sent back to the same Discord channel. Responses longer than ~1900 characters are automatically truncated.
 
 ## Key Features
 

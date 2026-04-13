@@ -3,7 +3,9 @@ import { spawn, type Subprocess } from "bun";
 import { Client, GatewayIntentBits, Partials, Events, type Message } from "discord.js";
 import { loadConfig } from "./config/schema.js";
 import { writeFileSync, existsSync, unlinkSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+
+const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..");
 
 const config = loadConfig();
 
@@ -132,13 +134,45 @@ client.on(Events.MessageCreate, async (msg) => {
       writeFileSync(RESTART_FLAG, "1", "utf-8");
       break;
 
+    case "shell": {
+      const shellCmd = msg.content.slice(PREFIX.length).trim().slice("shell".length).trim();
+      if (!shellCmd) {
+        await msg.reply("⚠️ Usage: `!shell <command>`");
+        break;
+      }
+      await msg.react("⏳");
+      try {
+        const proc = Bun.spawn(["bash", "-c", shellCmd], {
+          cwd: REPO_ROOT,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const [stdout, stderr, exitCode] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]);
+        const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
+        const MAX = 1900;
+        const truncated = combined.length > MAX
+          ? combined.slice(0, MAX) + "\n…(truncated)"
+          : combined || "_(no output)_";
+        const status = exitCode === 0 ? "✅" : `❌ (exit ${exitCode})`;
+        await msg.reply(`${status} \`${shellCmd}\`\n\`\`\`\n${truncated}\n\`\`\``);
+      } catch (err: unknown) {
+        await msg.reply(`❌ Failed to run command: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      break;
+    }
+
     case "help":
       await msg.reply(
         "**Supervisor commands**\n" +
         "`!status` — check gateway status\n" +
         "`!start` — start gateway\n" +
         "`!stop` — stop gateway\n" +
-        "`!restart` — restart gateway"
+        "`!restart` — restart gateway\n" +
+        "`!shell <cmd>` — run shell command from repo root"
       );
       break;
   }
