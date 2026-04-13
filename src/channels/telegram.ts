@@ -129,15 +129,18 @@ export class TelegramChannel implements BaseChannel {
         "/status — show session info\n" +
 
         "/btw <message> — raw LLM query (no memory, no context)\n" +
+        "/b <message> — short for /btw\n" +
+        "/think <question> — use advanced model for difficult tasks\n" +
+        "/t <question> — short for /think\n" +
         "/double <message> — parallel dual-agent with cross-review\n" +
         "/help — show this message"
       );
     });
 
-    this.bot.command("btw", async (ctx) => {
+    this.bot.command(["btw", "b"], async (ctx) => {
       if (!this.isAllowed(ctx)) return;
       const text = ctx.message?.text ?? "";
-      const prompt = text.replace(/^\/btw(@\w+)?\s*/, "").trim();
+      const prompt = text.replace(/^\/(btw|b)(@\w+)?\s*/, "").trim();
       if (!prompt) {
         await ctx.reply("Usage: /btw <your message>");
         return;
@@ -162,7 +165,7 @@ export class TelegramChannel implements BaseChannel {
       }
     });
 
-    this.bot.command(["new", "end", "dream", "status", "double"], async (ctx) => {
+    this.bot.command(["new", "end", "dream", "status", "double", "think", "t"], async (ctx) => {
       if (!this.isAllowed(ctx)) return;
       const chatId = String(ctx.chat.id);
       const senderId = ctx.from ? String(ctx.from.id) : chatId;
@@ -318,6 +321,9 @@ export class TelegramChannel implements BaseChannel {
       { command: "dream", description: "Run memory consolidation" },
       { command: "status", description: "Show session info" },
       { command: "btw", description: "Raw LLM query (no memory, no context)" },
+      { command: "b", description: "Short for /btw" },
+      { command: "think", description: "Use advanced model for difficult tasks" },
+      { command: "t", description: "Short for /think" },
       { command: "double", description: "Parallel dual-agent with cross-review" },
       { command: "help", description: "Show help" },
     ]);

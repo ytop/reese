@@ -192,11 +192,11 @@ export class AgentLoop {
       return { channel: msg.channel, chatId: msg.chatId, content: "Stop requested." };
     }
 
-    if (cmd === "/think") {
+    if (cmd === "/think" || cmd === "/t") {
       const thinkModel = this.config.thinkModelName || this.config.modelName;
-      const userMessage = raw.slice(6).trim();
+      const userMessage = cmd === "/think" ? raw.slice(6).trim() : raw.slice(2).trim();
       if (!userMessage) {
-        return { channel: msg.channel, chatId: msg.chatId, content: "Usage: /think <your question>" };
+        return { channel: msg.channel, chatId: msg.chatId, content: `Usage: ${cmd} <your question>` };
       }
       return null; // Continue to processMessage with think mode
     }
@@ -237,6 +237,7 @@ export class AgentLoop {
           "/new — start a new conversation\n" +
           "/end — cancel current task\n" +
           "/think <question> — use advanced model for difficult tasks\n" +
+          "/t <question> — short for /think\n" +
           "/double <message> — parallel dual-agent with cross-review\n" +
           "/dream — run memory consolidation now\n" +
           "/status — show session info\n" +
@@ -411,6 +412,9 @@ export class AgentLoop {
     if (raw.toLowerCase().startsWith("/think ")) {
       useThinkModel = true;
       actualContent = raw.slice(7).trim();
+    } else if (raw.toLowerCase().startsWith("/t ")) {
+      useThinkModel = true;
+      actualContent = raw.slice(3).trim();
     }
 
     // Slash commands
