@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 
-const DATA_FILE = './app/events.json';
+const DATA_FILE = '../workspace/calendar/events.json';
 
 export interface Event {
   id: string;

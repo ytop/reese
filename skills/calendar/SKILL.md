@@ -7,7 +7,11 @@ description: Manage calendar events using the local calendar app
 
 Use the calendar app located in `./app/` to manage events.
 
+> **Data file:** `./workspace/calendar/events.json` (relative to repo root)
+
 ## Available Commands
+
+All commands must be run from the **repo root** using `cd app && ...`.
 
 **Add event:**
 ```bash
