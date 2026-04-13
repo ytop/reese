@@ -4,9 +4,5 @@ node_modules/
 dist/
 tmp/
 workspace/
-workspace/sessions/
-workspace/memory/history.jsonl
-workspace/memory/.cursor
-workspace/memory/.dream_cursor
 *.log
 app/bun.lock
