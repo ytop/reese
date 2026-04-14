@@ -6,3 +6,4 @@ tmp/
 workspace/
 *.log
 app/bun.lock
+.aider*
