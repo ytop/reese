@@ -2,12 +2,20 @@
 import { spawn, type Subprocess } from "bun";
 import { Client, GatewayIntentBits, Partials, Events, type Message } from "discord.js";
 import { loadConfig } from "./config/schema.js";
+import { OpenAICompatProvider } from "./providers/openai_compat.js";
 import { writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 
 const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..");
 
 const config = loadConfig();
+
+const provider = new OpenAICompatProvider({
+  apiKey: config.modelApiKey,
+  apiBase: config.modelApiBase,
+  defaultModel: config.modelName,
+  maxTokens: config.maxTokens,
+});
 
 if (!config.discordBotToken) {
   console.error("❌ DISCORD_BOT_TOKEN is not set in .env — Supervisor requires Discord.");
@@ -92,12 +100,54 @@ function isGatewayRunning(): boolean {
 }
 
 // ─── Command handler ───────────────────────────────────────────────────────────
-const PREFIX = "!";
+const PREFIX = "/";
 
 client.on(Events.MessageCreate, async (msg) => {
   if (msg.author.bot) return;
   if (!isAllowed(msg)) return;
-  if (!msg.content.startsWith(PREFIX)) return;
+  if (!msg.content.startsWith(PREFIX)) {
+    const prompt = msg.content.trim();
+    if (!prompt) return;
+
+    await msg.react("⏳").catch(() => {});
+    try {
+      let replyMsg: Message | null = null;
+      let fullText = "";
+      let lastEdit = Date.now();
+      const DISCORD_MAX_LEN = 2000;
+
+      await provider.chatStream({
+        messages: [{ role: "user", content: prompt }],
+        onDelta: async (delta: string) => {
+          fullText += delta;
+          const now = Date.now();
+          if (!replyMsg) {
+            replyMsg = await msg.reply(delta.slice(0, DISCORD_MAX_LEN));
+            lastEdit = now;
+          } else if (now - lastEdit >= 1000) {
+            await replyMsg.edit(fullText.slice(0, DISCORD_MAX_LEN)).catch(() => {});
+            lastEdit = now;
+          }
+        },
+      });
+
+      if (replyMsg) {
+        await replyMsg.edit(fullText.slice(0, DISCORD_MAX_LEN)).catch(() => {});
+      } else if (fullText) {
+        await msg.reply(fullText.slice(0, DISCORD_MAX_LEN));
+      } else {
+        await msg.reply("_(empty response)_");
+      }
+      
+      const reaction = msg.reactions.resolve("⏳");
+      if (reaction && client.user?.id) {
+        await reaction.users.remove(client.user.id).catch(() => {});
+      }
+    } catch (err: unknown) {
+      await msg.reply(`❌ LLM Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
 
   const [cmd] = msg.content.slice(PREFIX.length).trim().split(/\s+/);
 
@@ -192,7 +242,7 @@ client.on(Events.MessageCreate, async (msg) => {
         geminiPrompt.length > 80 ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
       await msg.react("⏳");
       try {
-        const geminiProc = Bun.spawn(["gemini", "--model", geminiModel, "-p", geminiPrompt], {
+        const geminiProc = Bun.spawn(["gemini", "--yolo", "--model", geminiModel, "-p", geminiPrompt], {
           cwd: REPO_ROOT,
           stdout: "pipe",
           stderr: "pipe",
@@ -217,10 +267,11 @@ client.on(Events.MessageCreate, async (msg) => {
       break;
     }
 
+    case "$":
     case "shell": {
-      const shellCmd = msg.content.slice(PREFIX.length).trim().slice("shell".length).trim();
+      const shellCmd = msg.content.slice(PREFIX.length).trim().slice(cmd.length).trim();
       if (!shellCmd) {
-        await msg.reply("⚠️ Usage: `!shell <command>`");
+        await msg.reply(`⚠️ Usage: \`${PREFIX}${cmd} <command>\``);
         break;
       }
       await msg.react("⏳");
@@ -251,13 +302,13 @@ client.on(Events.MessageCreate, async (msg) => {
     case "help":
       await msg.reply(
         "**Supervisor commands**\n" +
-        "`!status` — check gateway status\n" +
-        "`!start` — start gateway\n" +
-        "`!stop` — stop gateway\n" +
-        "`!restart` — restart gateway\n" +
-        "`!upgrade` — stop gateway, git pull, restart gateway\n" +
-        "`!shell <cmd>` — run shell command from repo root\n" +
-        "`!gemini <prompt>` — ask Gemini (flash for ≤80 chars, pro for longer)"
+        "`/status` — check gateway status\n" +
+        "`/start` — start gateway\n" +
+        "`/stop` — stop gateway\n" +
+        "`/restart` — restart gateway\n" +
+        "`/upgrade` — stop gateway, git pull, restart gateway\n" +
+        "`/shell` or `/$` `<cmd>` — run shell command from repo root\n" +
+        "`/gemini <prompt>` — ask Gemini (flash for ≤80 chars, pro for longer)"
       );
       break;
   }

@@ -82,6 +82,7 @@ function splitMessage(text: string, maxLen = TELEGRAM_MAX_LEN): string[] {
 export class TelegramChannel implements BaseChannel {
   private bot: Bot;
   private allowFrom: Set<string>;
+  private logsEnabled: boolean = true;
   // streaming: chat_id → { messageId, text }
   private streamBufs = new Map<string, { messageId: number; text: string; lastEdit: number }>();
 
@@ -133,6 +134,7 @@ export class TelegramChannel implements BaseChannel {
         "/think <question> — use advanced model for difficult tasks\n" +
         "/t <question> — short for /think\n" +
         "/double <message> — parallel dual-agent with cross-review\n" +
+        "/logx — toggle log info written to telegram\n" +
         "/help — show this message"
       );
     });
@@ -151,7 +153,7 @@ export class TelegramChannel implements BaseChannel {
       }
       const chatId = String(ctx.chat.id);
       const numChatId = ctx.chat.id;
-      await ctx.api.sendChatAction(numChatId, "typing").catch(() => {});
+      await ctx.api.sendChatAction(numChatId, "typing").catch(() => { });
       try {
         await this.provider.chatStream({
           messages: [{ role: "user", content: prompt }],
@@ -163,6 +165,12 @@ export class TelegramChannel implements BaseChannel {
       } catch (err) {
         await ctx.reply(`❌ ${err instanceof Error ? err.message : String(err)}`);
       }
+    });
+
+    this.bot.command("logx", async (ctx) => {
+      if (!this.isAllowed(ctx)) return;
+      this.logsEnabled = !this.logsEnabled;
+      await ctx.reply(`Logs are now ${this.logsEnabled ? "🟢 ENABLED" : "🔴 DISABLED"} in Telegram.`);
     });
 
     this.bot.command(["new", "end", "dream", "status", "double", "think", "t"], async (ctx) => {
@@ -194,14 +202,14 @@ export class TelegramChannel implements BaseChannel {
       const msg = ctx.message;
       const text = msg.text ?? msg.caption ?? "";
       if (!text) {
-        console.log(`[Telegram] Message has no text, ignoring (type=${Object.keys(msg).filter(k => !['from','chat','date','message_id'].includes(k)).join(",")})`);
+        console.log(`[Telegram] Message has no text, ignoring (type=${Object.keys(msg).filter(k => !['from', 'chat', 'date', 'message_id'].includes(k)).join(",")})`);
         return;
       }
 
       console.log(`[Telegram] Publishing inbound: "${text.slice(0, 80)}"`);
 
       // Show typing indicator
-      await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {});
+      await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => { });
 
       this.bus.publishInbound({
         channel: "telegram",
@@ -248,6 +256,9 @@ export class TelegramChannel implements BaseChannel {
     }
     if (isProgress) {
       return; // Skip progress messages for Telegram
+    }
+    if (isLog && !this.logsEnabled) {
+      return; // Skip logs if toggled off
     }
 
     if (!content || content === "[empty message]") {
@@ -325,6 +336,7 @@ export class TelegramChannel implements BaseChannel {
       { command: "think", description: "Use advanced model for difficult tasks" },
       { command: "t", description: "Short for /think" },
       { command: "double", description: "Parallel dual-agent with cross-review" },
+      { command: "logx", description: "Toggle log info written to telegram" },
       { command: "help", description: "Show help" },
     ]);
     this.bot.start({ onStart: (info) => console.log(`[Telegram] Bot @${info.username} connected`) });
