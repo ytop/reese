@@ -95,12 +95,22 @@ export class TelegramChannel implements BaseChannel {
     this.bot = new Bot(token);
     this.allowFrom = new Set(allowFrom);
 
+    if (!this.allowFrom.size) {
+      console.warn(
+        "[Telegram] SECURITY: TELEGRAM_ALLOW_FROM is empty — all incoming messages will be rejected. " +
+        "Set TELEGRAM_ALLOW_FROM to a comma-separated list of user ids/usernames to enable the bot."
+      );
+    }
+
     this.setupHandlers();
     this.setupOutbound();
   }
 
   private isAllowed(ctx: Context): boolean {
-    if (!this.allowFrom.size) return true; // no allowlist = open
+    if (!this.allowFrom.size) {
+      console.log("[Telegram] Rejected: no allowlist configured (set TELEGRAM_ALLOW_FROM)");
+      return false;
+    }
     const user = ctx.from;
     if (!user) {
       console.log("[Telegram] Rejected: no user on context");
