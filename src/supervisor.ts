@@ -232,37 +232,35 @@ client.on(Events.MessageCreate, async (msg) => {
       break;
     }
 
-    case "gemini": {
-      const geminiPrompt = msg.content.slice(PREFIX.length).trim().slice("gemini".length).trim();
-      if (!geminiPrompt) {
-        await msg.reply("⚠️ Usage: `!gemini <prompt>`");
+    case "apm": {
+      const apmPrompt = msg.content.slice(PREFIX.length).trim().slice("apm".length).trim();
+      if (!apmPrompt) {
+        await msg.reply(`⚠️ Usage: \`${PREFIX}apm <prompt>\``);
         break;
       }
-      const geminiModel =
-        geminiPrompt.length > 80 ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
       await msg.react("⏳");
       try {
-        const geminiProc = Bun.spawn(["gemini", "--yolo", "--model", geminiModel, "-p", geminiPrompt], {
+        const apmProc = Bun.spawn(["apm", "--dangerously-allow-all", "-x", apmPrompt], {
           cwd: REPO_ROOT,
           stdout: "pipe",
           stderr: "pipe",
         });
-        const [geminiStdout, geminiStderr, geminiExit] = await Promise.all([
-          new Response(geminiProc.stdout).text(),
-          new Response(geminiProc.stderr).text(),
-          geminiProc.exited,
+        const [apmStdout, apmStderr, apmExit] = await Promise.all([
+          new Response(apmProc.stdout).text(),
+          new Response(apmProc.stderr).text(),
+          apmProc.exited,
         ]);
-        const geminiCombined = [geminiStdout, geminiStderr].filter(Boolean).join("\n").trim();
+        const apmCombined = [apmStdout, apmStderr].filter(Boolean).join("\n").trim();
         const MAX = 1900;
-        const geminiTruncated = geminiCombined.length > MAX
-          ? geminiCombined.slice(0, MAX) + "\n…(truncated)"
-          : geminiCombined || "_(no output)_";
-        const geminiStatus = geminiExit === 0 ? "✅" : `❌ (exit ${geminiExit})`;
+        const apmTruncated = apmCombined.length > MAX
+          ? apmCombined.slice(0, MAX) + "\n…(truncated)"
+          : apmCombined || "_(no output)_";
+        const apmStatus = apmExit === 0 ? "✅" : `❌ (exit ${apmExit})`;
         await msg.reply(
-          `${geminiStatus} \`gemini\` [\`${geminiModel}\`]\n\`\`\`\n${geminiTruncated}\n\`\`\``
+          `${apmStatus} \`apm\`\n\`\`\`\n${apmTruncated}\n\`\`\``
         );
       } catch (err: unknown) {
-        await msg.reply(`❌ Failed to run gemini: ${err instanceof Error ? err.message : String(err)}`);
+        await msg.reply(`❌ Failed to run apm: ${err instanceof Error ? err.message : String(err)}`);
       }
       break;
     }
@@ -308,7 +306,7 @@ client.on(Events.MessageCreate, async (msg) => {
         "`/restart` — restart gateway\n" +
         "`/upgrade` — stop gateway, git pull, restart gateway\n" +
         "`/shell` or `/$` `<cmd>` — run shell command from repo root\n" +
-        "`/gemini <prompt>` — ask Gemini (flash for ≤80 chars, pro for longer)"
+        "`/apm <prompt>` — run apm with --dangerously-allow-all -x"
       );
       break;
   }
