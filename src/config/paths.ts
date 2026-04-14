@@ -17,7 +17,6 @@ export function workspacePaths(workspaceDir: string) {
     sessions,
     skills,
     media,
-    userFile: join(workspaceDir, "USER.md"),
     heartbeatFile: join(workspaceDir, "HEARTBEAT.md"),
     memoryFile: join(memory, "MEMORY.md"),
     historyFile: join(memory, "history.jsonl"),

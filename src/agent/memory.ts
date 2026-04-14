@@ -26,10 +26,8 @@ export class MemoryStore {
     catch { return ""; }
   }
 
-  readUser(): string { return this.readFile(this.paths.userFile); }
   readMemory(): string { return this.readFile(this.paths.memoryFile); }
 
-  writeUser(c: string) { writeFileSync(this.paths.userFile, c, "utf-8"); }
   writeMemory(c: string) { writeFileSync(this.paths.memoryFile, c, "utf-8"); }
 
   getMemoryContext(): string {
@@ -177,8 +175,7 @@ export class Dream {
     const currentDate = new Date().toISOString().slice(0, 10);
     const memCtx =
       `## Current Date\n${currentDate}\n\n` +
-      `## MEMORY.md\n${this.store.readMemory() || "(empty)"}\n\n` +
-      `## USER.md\n${this.store.readUser() || "(empty)"}`;
+      `## MEMORY.md\n${this.store.readMemory() || "(empty)"}\n\n`;
 
     // Phase 1: Analyze
     let analysis: string;
@@ -210,7 +207,7 @@ export class Dream {
             role: "system",
             content:
               "You are a memory editor. Given an analysis, produce updated versions of the memory files. " +
-              "Return a JSON object with optional keys: memory (string), user (string). " +
+              "Return a JSON object with optional keys: memory (string). " +
               "Only include keys for files that need changes.\n" +
               "Rules: Keep files concise. Preserve existing structure. Use markdown. Be surgical.",
           },
@@ -226,10 +223,8 @@ export class Dream {
       if (jsonMatch) {
         const updates = JSON.parse(jsonMatch[0]) as {
           memory?: string;
-          user?: string;
         };
         if (updates.memory) this.store.writeMemory(updates.memory);
-        if (updates.user) this.store.writeUser(updates.user);
       }
     } catch { /* non-fatal */ }
 
