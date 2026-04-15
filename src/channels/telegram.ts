@@ -129,42 +129,12 @@ export class TelegramChannel implements BaseChannel {
         "/dream — run memory consolidation\n" +
         "/status — show session info\n" +
 
-        "/btw <message> — raw LLM query (no memory, no context)\n" +
-        "/b <message> — short for /btw\n" +
         "/think <question> — use advanced model for difficult tasks\n" +
         "/t <question> — short for /think\n" +
         "/double <message> — parallel dual-agent with cross-review\n" +
         "/logx — toggle log info written to telegram\n" +
         "/help — show this message"
       );
-    });
-
-    this.bot.command(["btw", "b"], async (ctx) => {
-      if (!this.isAllowed(ctx)) return;
-      const text = ctx.message?.text ?? "";
-      const prompt = text.replace(/^\/(btw|b)(@\w+)?\s*/, "").trim();
-      if (!prompt) {
-        await ctx.reply("Usage: /btw <your message>");
-        return;
-      }
-      if (!this.provider) {
-        await ctx.reply("❌ LLM provider not available.");
-        return;
-      }
-      const chatId = String(ctx.chat.id);
-      const numChatId = ctx.chat.id;
-      await ctx.api.sendChatAction(numChatId, "typing").catch(() => { });
-      try {
-        await this.provider.chatStream({
-          messages: [{ role: "user", content: prompt }],
-          onDelta: async (delta: string) => {
-            await this.handleStreamDelta(numChatId, chatId, delta);
-          },
-        });
-        await this.finalizeStream(numChatId, chatId);
-      } catch (err) {
-        await ctx.reply(`❌ ${err instanceof Error ? err.message : String(err)}`);
-      }
     });
 
     this.bot.command("logx", async (ctx) => {
@@ -331,8 +301,6 @@ export class TelegramChannel implements BaseChannel {
       { command: "end", description: "Stop current task" },
       { command: "dream", description: "Run memory consolidation" },
       { command: "status", description: "Show session info" },
-      { command: "btw", description: "Raw LLM query (no memory, no context)" },
-      { command: "b", description: "Short for /btw" },
       { command: "think", description: "Use advanced model for difficult tasks" },
       { command: "t", description: "Short for /think" },
       { command: "double", description: "Parallel dual-agent with cross-review" },
