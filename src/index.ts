@@ -26,8 +26,8 @@ reese — Personal AI Agent
 
 Usage:
   reese              Launch the interactive TUI
-  reese gateway      Start the gateway (Telegram bot)
-  reese supervisor   Start the supervisor (manages gateway via Telegram)
+  reese gateway      Start the gateway (Telegram bot + Discord fallback)
+  reese supervisor   Start the supervisor (manages gateway via Discord)
 
 Environment:
   Copy .env.example to .env and fill in your settings.
@@ -70,33 +70,50 @@ async function main() {
 
   if (mode === "supervisor") {
     // Supervisor mode - manages gateway lifecycle
-    const { default: supervisor } = await import("./supervisor.js");
+    await import("./supervisor.js");
     return;
   }
 
   if (mode === "gateway") {
-    // Gateway mode — Telegram only
-    if (!config.telegramBotToken) {
-      console.error("❌ TELEGRAM_BOT_TOKEN is not set. Gateway requires Telegram.");
+    // Gateway mode — support for Telegram and/or Discord
+    if (!config.telegramBotToken && !config.discordBotToken) {
+      console.error("❌ Neither TELEGRAM_BOT_TOKEN nor DISCORD_BOT_TOKEN is set. Gateway requires at least one channel.");
       process.exit(1);
     }
 
-    const { TelegramChannel } = await import("./channels/telegram.js");
-    const telegram = new TelegramChannel(
-      config.telegramBotToken,
-      bus,
-      config.telegramAllowFrom,
-      provider,
-    );
-    const channels = [
-      {
+    const channels: any[] = [];
+
+    if (config.telegramBotToken) {
+      const { TelegramChannel } = await import("./channels/telegram.js");
+      const telegram = new TelegramChannel(
+        config.telegramBotToken,
+        bus,
+        config.telegramAllowFrom,
+        provider,
+      );
+      channels.push({
         name: "telegram",
         channel: telegram,
         rateLimitWindow: 60000, // 1 minute
         rateLimitMax: 20, // 20 messages per minute
-      },
-    ];
-    
+      });
+    }
+
+    if (config.discordBotToken && !process.env.SUPERVISOR_MODE) {
+      const { DiscordChannel } = await import("./channels/discord.js");
+      const discord = new DiscordChannel(
+        config.discordBotToken,
+        bus,
+        config.discordAllowFrom,
+      );
+      channels.push({
+        name: "discord",
+        channel: discord,
+        rateLimitWindow: 60000,
+        rateLimitMax: 50,
+      });
+    }
+
     const { ChannelManager } = await import("./channels/manager.js");
     const manager = new ChannelManager(bus, channels);
     
@@ -104,10 +121,12 @@ async function main() {
     console.log(`   Channels: ${channels.map(c => c.name).join(", ")}`);
 
     // Configure logger to send to Telegram if available
-    const logChatId = config.telegramLogChatId || config.telegramAllowFrom[0];
-    if (logChatId && config.telegramBotToken) {
-      logger.setTelegram(bus, logChatId);
-      logger.info("System", `Agent started in gateway mode (model: ${config.modelName})`);
+    if (config.telegramBotToken) {
+      const logChatId = config.telegramLogChatId || config.telegramAllowFrom[0];
+      if (logChatId) {
+        logger.setTelegram(bus, logChatId);
+        logger.info("System", `Agent started in gateway mode (model: ${config.modelName})`);
+      }
     } else {
       console.warn("⚠️  No TELEGRAM_LOG_CHAT_ID configured - logs will only be written to file");
     }

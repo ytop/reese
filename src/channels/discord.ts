@@ -24,7 +24,7 @@ export class DiscordChannel implements BaseChannel {
   private streamBufs = new Map<string, { messageId: string; text: string; lastEdit: number }>();
 
   constructor(
-    token: string,
+    private token: string,
     private bus: MessageBus,
     allowFrom: string[] = [],
   ) {
@@ -43,7 +43,6 @@ export class DiscordChannel implements BaseChannel {
     this.allowFrom = new Set(allowFrom);
     this.setupHandlers();
     this.setupOutbound();
-    this.client.login(token);
   }
 
   private isAllowed(msg: Message): boolean {
@@ -66,7 +65,10 @@ export class DiscordChannel implements BaseChannel {
       const senderId = msg.author.id;
       const text = msg.content;
 
-      if (!text) return;
+      if (!text) {
+        console.warn(`[Discord] Received empty message from ${senderId}. Ensure "Message Content Intent" is enabled in Discord Developer Portal.`);
+        return;
+      }
 
       console.log(`[Discord] Message from user=${senderId} channel=${chatId}`);
 
@@ -163,6 +165,7 @@ export class DiscordChannel implements BaseChannel {
 
   async start(): Promise<void> {
     console.log("[Discord] Starting...");
+    await this.client.login(this.token);
   }
 
   async stop(): Promise<void> {
