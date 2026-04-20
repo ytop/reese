@@ -103,10 +103,10 @@ export class AgentLoop {
 
   private registerTools(): void {
     const ws = this.config.workspaceDir;
-    this.tools.register(new ReadFileTool(ws));
-    this.tools.register(new WriteFileTool(ws));
-    this.tools.register(new EditFileTool(ws));
-    this.tools.register(new ListDirTool(ws));
+    this.tools.register(new ReadFileTool(ws, ws));
+    this.tools.register(new WriteFileTool(ws, ws));
+    this.tools.register(new EditFileTool(ws, ws));
+    this.tools.register(new ListDirTool(ws, ws));
     this.tools.register(new ExecTool(ws));
     this.tools.register(new GrepTool(ws));
     this.tools.register(new GlobTool(ws));
