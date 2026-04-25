@@ -1,13 +1,11 @@
 ---
 name: calendar
-description: Manage calendar events using the local calendar app
+description: Manage calendar events
 ---
 
 # Calendar Management
 
 Use the calendar app located in `./app/` to manage events.
-
-> **Data file:** `$HOME/.reese/workspace/calendar/events.json`
 
 ## Available Commands
 
@@ -22,6 +20,12 @@ bun app/cli.tsx add "<title>" "<date>" "[description]"
 ```bash
 bun app/cli.tsx list
 ```
+
+**List events in range:**
+```bash
+bun app/cli.tsx list "<start_date>" "<end_date>"
+```
+Example: `bun app/cli.tsx list "2026-04-01" "2026-04-30"`
 
 **Get event details:**
 ```bash
@@ -41,10 +45,11 @@ bun app/cli.tsx delete <id>
 
 ## Date Format
 
-Use ISO format (YYYY-MM-DD) or natural dates like "2026-04-15".
+Use ISO format (YYYY-MM-DD).
 
 ## Examples
 
 - "Add a meeting on April 15th" → `bun app/cli.tsx add "Meeting" "2026-04-15"`
-- "Show my calendar" → `bun app/cli.tsx list`
-- "Delete event 1234567890" → `bun app/cli.tsx delete 1234567890`
+- "Show events for this week" → `bun app/cli.tsx list "2026-04-20" "2026-04-26"`
+- "Update event 5 title" → `bun app/cli.tsx update 5 title "New Title"`
+- "Delete event 5" → `bun app/cli.tsx delete 5`
