@@ -82,11 +82,20 @@ export class AgentRunner {
       }
 
       ctx.response = response;
-      ctx.toolCalls = response.toolCalls;
+
+      // Extract tool calls (native or plain-text fallback)
+      let toolCalls = response.toolCalls;
+      if (toolCalls.length === 0 && response.content) {
+        const textCalls = parseTextToolCalls(response.content);
+        if (textCalls.length > 0) {
+          toolCalls = textCalls;
+        }
+      }
+      ctx.toolCalls = toolCalls;
 
       // Handle tool calls
-      if (response.toolCalls.length > 0) {
-        const toolDetails = response.toolCalls.map(tc => {
+      if (toolCalls.length > 0) {
+        const toolDetails = toolCalls.map(tc => {
           const args = tc.arguments as Record<string, unknown>;
           if (tc.name === "read_file" && args.path) return `${tc.name}(${args.path})`;
           if (tc.name === "list_dir" && args.path) return `${tc.name}(${args.path})`;
@@ -97,7 +106,7 @@ export class AgentRunner {
           }
           return tc.name;
         }).join(", ");
-        logger.info("Tools", `Executing ${response.toolCalls.length} tool(s): ${toolDetails}`);
+        logger.info("Tools", `Executing ${toolCalls.length} tool(s): ${toolDetails}`);
         
         if (hook.wantsStreaming()) await hook.onStreamEnd(true);
         await hook.beforeExecuteTools(ctx);
@@ -105,21 +114,21 @@ export class AgentRunner {
         const assistantMsg: ChatMessage = {
           role: "assistant",
           content: response.content,
-          tool_calls: response.toolCalls.map((tc) => ({
+          tool_calls: toolCalls.map((tc) => ({
             id: tc.id,
             type: "function" as const,
             function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
           })),
         };
         messages.push(assistantMsg);
-        toolsUsed.push(...response.toolCalls.map((tc) => tc.name));
+        toolsUsed.push(...toolCalls.map((tc) => tc.name));
 
         // Execute tools
-        const results = await spec.tools.executeBatch(response.toolCalls);
+        const results = await spec.tools.executeBatch(toolCalls);
         ctx.toolResults = results;
 
-        for (let i = 0; i < response.toolCalls.length; i++) {
-          const tc = response.toolCalls[i];
+        for (let i = 0; i < toolCalls.length; i++) {
+          const tc = toolCalls[i];
           const result = truncate(results[i], spec.maxToolResultChars);
           messages.push({
             role: "tool",
@@ -204,3 +213,50 @@ export class AgentRunner {
     return result;
   }
 }
+
+function parseTextToolCalls(content: string | null): ToolCallRequest[] {
+  if (!content) return [];
+  const toolCalls: ToolCallRequest[] = [];
+  
+  // Format 1: [CALL: tool_name {"arg1": "val"}]
+  const callRegex = /\[CALL:\s*(\w+)\s*(\{.*?\})\]/g;
+  let match;
+  while ((match = callRegex.exec(content)) !== null) {
+    const [, name, jsonArgs] = match;
+    try {
+      toolCalls.push({
+        id: `call_${Math.random().toString(36).substring(2, 11)}`,
+        name,
+        arguments: JSON.parse(jsonArgs),
+      });
+    } catch {
+      // best-effort
+    }
+  }
+
+  // Format 2: CALL: tool_name(arg="val", arg2="val")
+  if (toolCalls.length === 0) {
+    const inlineRegex = /CALL:\s*(\w+)\((.*?)\)/g;
+    while ((match = inlineRegex.exec(content)) !== null) {
+      const [, name, argsStr] = match;
+      const args: Record<string, string> = {};
+      const argPairs = argsStr.split(/,\s*/);
+      for (const pair of argPairs) {
+        const parts = pair.split("=");
+        if (parts.length === 2) {
+          const k = parts[0].trim();
+          const v = parts[1].trim().replace(/^['"]|['"]$/g, ""); // strip quotes
+          args[k] = v;
+        }
+      }
+      toolCalls.push({
+        id: `call_${Math.random().toString(36).substring(2, 11)}`,
+        name,
+        arguments: args,
+      });
+    }
+  }
+
+  return toolCalls;
+}
+

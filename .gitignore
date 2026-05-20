@@ -7,3 +7,4 @@ workspace/
 *.log
 app/bun.lock
 .aider*
+.antigravitycli/

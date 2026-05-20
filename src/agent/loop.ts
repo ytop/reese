@@ -321,14 +321,17 @@ export class AgentLoop {
     model: string,
     agentName: string
   ): Promise<string> {
-    const messages = this.context.buildCompactMessages(session.compactContext, userMessage, {
+    const history = this.sessions.getHistory(session);
+    const messages = this.context.buildCompactMessages(session.compactContext, history, userMessage, {
       channel: msg.channel,
       chatId: msg.chatId,
     });
 
+    const selectedTools = this.selectToolsForMessage(userMessage);
+
     const result = await this.runner.run({
       initialMessages: messages,
-      tools: this.tools,
+      tools: selectedTools,
       model,
       maxIterations: this.config.maxIterations,
       maxToolResultChars: this.config.maxToolResultChars,
@@ -345,6 +348,11 @@ export class AgentLoop {
     );
     this.sessions.save(session);
 
+    // Dynamic logging & micro-consolidation in background
+    this.context.memory.appendHistory(`[USER]: ${userMessage}\n[REESE]: ${reply}`);
+    this.triggerMicroConsolidation(userMessage, reply).catch(console.error);
+    this.triggerBackgroundConsolidation(session.key, session).catch(console.error);
+
     return reply || "(no response)";
   }
 
@@ -357,15 +365,19 @@ export class AgentLoop {
     agentName: string
   ): Promise<string> {
     const reviewPrompt = `Review: ${otherResponse}`;
+    const history = this.sessions.getHistory(session);
     
-    const messages = this.context.buildCompactMessages(session.compactContext, reviewPrompt, {
+    const messages = this.context.buildCompactMessages(session.compactContext, history, reviewPrompt, {
       channel: "system",
       chatId: "review",
     });
 
+    // Cross-review does not require tools
+    const selectedTools = new ToolRegistry();
+
     const result = await this.runner.run({
       initialMessages: messages,
-      tools: this.tools,
+      tools: selectedTools,
       model,
       maxIterations: Math.floor(this.config.maxIterations / 2),
       maxToolResultChars: this.config.maxToolResultChars,
@@ -381,6 +393,10 @@ export class AgentLoop {
       { role: "assistant", content: reply }
     );
     this.sessions.save(session);
+
+    // Dynamic logging in background
+    this.context.memory.appendHistory(`[SYSTEM REVIEW]: ${reviewPrompt}\n[REESE REVIEW]: ${reply}`);
+    this.triggerBackgroundConsolidation(session.key, session).catch(console.error);
 
     return reply || "(no review)";
   }
@@ -436,8 +452,9 @@ export class AgentLoop {
     const spawnTool = this.tools.get("spawn") as SpawnTool | undefined;
     spawnTool?.setContext(msg.channel, msg.chatId);
 
-    // Build compact-context messages instead of full history
-    const messages = this.context.buildCompactMessages(session.compactContext, actualContent, {
+    // Build compact-context messages using verbatim recent history since consolidation
+    const history = this.sessions.getHistory(session);
+    const messages = this.context.buildCompactMessages(session.compactContext, history, actualContent, {
       channel: msg.channel,
       chatId: msg.chatId,
     });
@@ -467,9 +484,12 @@ export class AgentLoop {
       }),
     });
 
+    // Select dynamic tool schema subset to save tokens and prevent provider confusion
+    const selectedTools = this.selectToolsForMessage(actualContent);
+
     const result = await this.runner.run({
       initialMessages: messages,
-      tools: this.tools,
+      tools: selectedTools,
       model: modelToUse,
       maxIterations: this.config.maxIterations,
       maxToolResultChars: this.config.maxToolResultChars,
@@ -497,6 +517,11 @@ export class AgentLoop {
       { role: "assistant", content: reply }
     );
     this.sessions.save(session);
+
+    // Dynamic logging & micro-consolidation in background asynchronously
+    this.context.memory.appendHistory(`[USER]: ${actualContent}\n[REESE]: ${reply}`);
+    this.triggerMicroConsolidation(actualContent, reply).catch(console.error);
+    this.triggerBackgroundConsolidation(key, session).catch(console.error);
 
     // If message tool sent mid-turn, don't send final response again
     if (messageTool?.hasSentInTurn) {
@@ -547,6 +572,160 @@ export class AgentLoop {
       maxToolResultChars: this.config.maxToolResultChars,
     });
     return result.finalContent ?? "(no output)";
+  }
+
+  selectToolsForMessage(message: string): ToolRegistry {
+    const registry = new ToolRegistry();
+    
+    // Always register message and spawn
+    const messageTool = this.tools.get("message");
+    if (messageTool) registry.register(messageTool);
+    const spawnTool = this.tools.get("spawn");
+    if (spawnTool) registry.register(spawnTool);
+
+    const msgLower = message.toLowerCase();
+
+    // Check for web keywords
+    const hasWeb = /http|https|url|web|search|google|fetch|browse|download/i.test(msgLower);
+    if (hasWeb) {
+      const webFetch = this.tools.get("web_fetch");
+      if (webFetch) registry.register(webFetch);
+      const webSearch = this.tools.get("web_search");
+      if (webSearch) registry.register(webSearch);
+    }
+
+    // Check for file system keywords
+    const hasFile = /file|dir|folder|path|read|write|edit|create|list|ls|grep|glob|find|cat|mkdir\b|\w+\.\w+/i.test(msgLower);
+    if (hasFile) {
+      const readFile = this.tools.get("read_file");
+      if (readFile) registry.register(readFile);
+      const writeFile = this.tools.get("write_file");
+      if (writeFile) registry.register(writeFile);
+      const editFile = this.tools.get("edit_file");
+      if (editFile) registry.register(editFile);
+      const listDir = this.tools.get("list_dir");
+      if (listDir) registry.register(listDir);
+      const grep = this.tools.get("grep");
+      if (grep) registry.register(grep);
+      const glob = this.tools.get("glob");
+      if (glob) registry.register(glob);
+    }
+
+    // Check for shell keywords
+    const hasShell = /bash|terminal|shell|command|run|execute|install|npm|bun|pip|yarn|cargo|git|cmd|sh\b/i.test(msgLower);
+    if (hasShell) {
+      const exec = this.tools.get("exec");
+      if (exec) registry.register(exec);
+    }
+
+    return registry;
+  }
+
+  private async triggerBackgroundConsolidation(key: string, session: Session): Promise<void> {
+    const logger = Logger.get();
+    const unconsolidatedCount = session.messages.length - session.lastConsolidated;
+    
+    // Threshold is 6 turns
+    if (unconsolidatedCount < 6) return;
+
+    logger.info("Consolidation", `Triggering background consolidation for ${key} (unconsolidated count: ${unconsolidatedCount})`);
+    
+    const newLastConsolidated = session.messages.length;
+    const historyToConsolidate = session.messages.slice(session.lastConsolidated, newLastConsolidated);
+
+    const formattedTurns = historyToConsolidate
+      .filter((m) => m.content && typeof m.content === "string")
+      .map((m) => `[${m.role.toUpperCase()}]: ${m.content}`)
+      .join("\n");
+
+    const systemPrompt = 
+      "You are a conversation summarizer. Your job is to update a running conversation summary with the details of the most recent turns.\n" +
+      "Provide a highly compact, cohesive summary of the entire conversation so far.\n" +
+      "Highlight important context, tasks currently in progress, and decisions. Avoid conversational fluff. Keep it under 250 words.";
+
+    const userPrompt = 
+      `Existing Summary:\n${session.compactContext || "(No summary yet)"}\n\n` +
+      `New Turns:\n${formattedTurns}`;
+
+    try {
+      const response = await this.provider.chat({
+        model: this.config.modelName,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ]
+      });
+
+      if (response.content) {
+        session.compactContext = response.content.trim();
+        session.lastConsolidated = newLastConsolidated;
+        this.sessions.save(session);
+        logger.info("Consolidation", `Background consolidation complete for ${key}. New summary length: ${session.compactContext.length}`);
+      }
+    } catch (err) {
+      logger.error("Consolidation", `Failed to run background consolidation: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private shouldTriggerMicroConsolidation(userMsg: string, agentReply: string): boolean {
+    const memoryTriggers = [
+      "remember that",
+      "never forget",
+      "memorize",
+      "write down",
+      "remember to",
+      "save to memory",
+      "note down",
+      "keep in mind",
+      "my name is",
+      "i prefer",
+      "my preference",
+    ];
+    const msgLower = userMsg.toLowerCase();
+    const triggerMatched = memoryTriggers.some(trigger => msgLower.includes(trigger));
+    
+    const agentLower = agentReply.toLowerCase();
+    const agentMatched = agentLower.includes("remember") && (agentLower.includes("added") || agentLower.includes("saved") || agentLower.includes("will"));
+
+    return triggerMatched || agentMatched;
+  }
+
+  private async triggerMicroConsolidation(userMsg: string, agentReply: string): Promise<void> {
+    if (!this.shouldTriggerMicroConsolidation(userMsg, agentReply)) {
+      return;
+    }
+
+    const logger = Logger.get();
+    logger.info("MicroConsolidation", "Memory trigger detected. Running micro-consolidation.");
+
+    const currentMemory = this.context.memory.readMemory() || "(empty)";
+    const systemPrompt = 
+      "You are a precise memory consolidation assistant. Your task is to analyze the recent user-assistant interaction and extract a single, concise atomic fact (or a few key facts) that the user wanted the assistant to remember.\n" +
+      "If the interaction does not contain new persistent information to remember, output nothing (empty response).\n" +
+      "If there is a new fact, output the updated MEMORY.md content directly, merging/updating the new fact surgically. " +
+      "Do NOT add conversational explanation. Output ONLY the updated markdown memory.";
+
+    const userPrompt = 
+      `Current MEMORY.md:\n${currentMemory}\n\n` +
+      `Recent Interaction:\n[USER]: ${userMsg}\n[REESE]: ${agentReply}`;
+
+    try {
+      const response = await this.provider.chat({
+        model: this.config.modelName,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ]
+      });
+
+      const updated = response.content?.trim();
+      if (updated && updated !== "(empty)" && updated !== currentMemory) {
+        this.context.memory.writeMemory(updated);
+        logger.info("MicroConsolidation", "MEMORY.md updated surgically in real-time.");
+      }
+    } catch (err) {
+      logger.error("MicroConsolidation", `Failed to run micro-consolidation: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async runDream(): Promise<boolean> {
