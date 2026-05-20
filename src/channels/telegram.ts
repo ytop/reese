@@ -1,6 +1,7 @@
 import { Bot, type Context, InputFile } from "grammy";
 import type { MessageBus } from "../bus/queue.js";
 import type { BaseChannel } from "./base.js";
+import type { OutboundMessage } from "../bus/events.js";
 import type { LLMProvider } from "../providers/base.js";
 
 const TELEGRAM_MAX_LEN = 4000;
@@ -96,7 +97,12 @@ export class TelegramChannel implements BaseChannel {
     this.allowFrom = new Set(allowFrom);
 
     this.setupHandlers();
-    this.setupOutbound();
+  }
+
+  /** Public outbound entry-point. The ChannelManager calls this directly. */
+  async send(msg: OutboundMessage): Promise<void> {
+    console.log(`[Telegram] Outbound to chat=${msg.chatId} (${msg.content.length} chars)`);
+    await this.sendInternal(msg.chatId, msg.content, msg.metadata ?? {});
   }
 
   private isAllowed(ctx: Context): boolean {
@@ -197,15 +203,7 @@ export class TelegramChannel implements BaseChannel {
 
   }
 
-  private setupOutbound(): void {
-    this.bus.onOutbound(async (msg) => {
-      if (msg.channel !== "telegram") return;
-      console.log(`[Telegram] Outbound to chat=${msg.chatId} (${msg.content.length} chars)`);
-      await this.send(msg.chatId, msg.content, msg.metadata ?? {});
-    });
-  }
-
-  private async send(
+  private async sendInternal(
     chatId: string,
     content: string,
     metadata: Record<string, unknown>

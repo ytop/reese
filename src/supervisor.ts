@@ -315,7 +315,10 @@ client.on(Events.MessageCreate, async (msg) => {
 
     await msg.react("⏳").catch(() => {});
     try {
-      let replyMsg: Message | null = null;
+      // Use the actual return type of msg.reply() so closure narrowing in the
+      // streaming callback below doesn't collapse the variable to `never`.
+      type ReplyMessage = Awaited<ReturnType<typeof msg.reply>>;
+      let replyMsg: ReplyMessage | null = null;
       let fullText = "";
       let lastEdit = Date.now();
       const DISCORD_MAX_LEN = 2000;
@@ -325,18 +328,24 @@ client.on(Events.MessageCreate, async (msg) => {
         onDelta: async (delta: string) => {
           fullText += delta;
           const now = Date.now();
-          if (!replyMsg) {
+          // Snapshot into a local so the inner branch narrows across the await
+          // (TS won't narrow captured `let` vars through async boundaries).
+          const current = replyMsg;
+          if (!current) {
             replyMsg = await msg.reply(delta.slice(0, DISCORD_MAX_LEN));
             lastEdit = now;
           } else if (now - lastEdit >= 1000) {
-            await replyMsg.edit(fullText.slice(0, DISCORD_MAX_LEN)).catch(() => {});
+            await current.edit(fullText.slice(0, DISCORD_MAX_LEN)).catch(() => {});
             lastEdit = now;
           }
         },
       });
 
-      if (replyMsg) {
-        await replyMsg.edit(fullText.slice(0, DISCORD_MAX_LEN)).catch(() => {});
+      // Snapshot again for the post-stream block — same narrowing-through-
+      // closure caveat as inside onDelta.
+      const finalReply = replyMsg;
+      if (finalReply) {
+        await finalReply.edit(fullText.slice(0, DISCORD_MAX_LEN)).catch(() => {});
       } else if (fullText) {
         await msg.reply(fullText.slice(0, DISCORD_MAX_LEN));
       } else {

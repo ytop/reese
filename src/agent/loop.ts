@@ -19,8 +19,22 @@ import type { AppConfig } from "../config/schema.js";
 import type { ChatMessage } from "../providers/base.js";
 import { ensureWorkspace } from "../config/paths.js";
 import { Logger } from "../logger.js";
+import { BackgroundQueue } from "./queue.js";
 
 const UNIFIED_SESSION = "unified:default";
+/** Trailing-debounce window for per-session consolidation jobs. */
+const CONSOLIDATION_DEBOUNCE_MS = 30_000;
+/** Strong, explicit memory triggers — keeps micro-consolidation rare. */
+const MICRO_CONSOLIDATION_TRIGGERS: RegExp[] = [
+  /\bremember (that|to|this)\b/i,
+  /\bnever forget\b/i,
+  /\bmemorize\b/i,
+  /\bsave (to|in) memory\b/i,
+  /\bnote (this|down)\b/i,
+  /\bmy name is\b/i,
+  /\bi prefer\b/i,
+  /\bmy preference\b/i,
+];
 
 class LoopHook extends AgentHook {
   private streamBuf = "";
@@ -70,6 +84,7 @@ export class AgentLoop {
   private consolidator: Consolidator;
   private dream: Dream;
   private sessionLocks = new Map<string, Promise<void>>();
+  private bgQueue = new BackgroundQueue();
   private running = false;
   // Resolved when stop() is called — lets consumeInbound() race exit cleanly
   private stopResolve!: () => void;
@@ -101,6 +116,10 @@ export class AgentLoop {
     this.registerTools();
   }
 
+  private toolBuckets: { keywords: RegExp; toolNames: string[] }[] = [];
+  /** Tools that are always present regardless of message content. */
+  private alwaysToolNames: string[] = ["message", "spawn"];
+
   private registerTools(): void {
     const ws = this.config.workspaceDir;
     this.tools.register(new ReadFileTool(ws));
@@ -114,6 +133,23 @@ export class AgentLoop {
     this.tools.register(new WebSearchTool());
     this.tools.register(new MessageTool((msg) => this.bus.publishOutbound(msg)));
     this.tools.register(new SpawnTool(this));
+
+    // Pre-compute keyword → tool buckets. selectToolsForMessage just OR's the
+    // matching buckets together rather than rebuilding the registry per turn.
+    this.toolBuckets = [
+      {
+        keywords: /http|https|url|web|search|google|fetch|browse|download/i,
+        toolNames: ["web_fetch", "web_search"],
+      },
+      {
+        keywords: /file|dir|folder|path|read|write|edit|create|list|ls|grep|glob|find|cat|mkdir\b|\w+\.\w+/i,
+        toolNames: ["read_file", "write_file", "edit_file", "list_dir", "grep", "glob"],
+      },
+      {
+        keywords: /bash|terminal|shell|command|run|execute|install|npm|bun|pip|yarn|cargo|git|cmd|sh\b/i,
+        toolNames: ["exec"],
+      },
+    ];
   }
 
   /** Main loop — consume inbound messages and dispatch. */
@@ -151,6 +187,7 @@ export class AgentLoop {
 
   stop(): void {
     this.running = false;
+    this.bgQueue.cancelAll();
     this.stopResolve();
   }
 
@@ -280,30 +317,32 @@ export class AgentLoop {
       content: `🧠 Think Agent:\n${thinkResult}`,
     });
 
-    // Cross-review: Main reviews Think
-    const mainReview = await this.runCrossReview(
-      mainResult,
-      thinkResult,
-      mainSession,
-      this.provider,
-      this.config.modelName,
-      "Main"
-    );
+    // Cross-review: run both directions in parallel — they don't depend on
+    // each other and were artificially serial before.
+    const [mainReview, thinkReview] = await Promise.all([
+      this.runCrossReview(
+        mainResult,
+        thinkResult,
+        mainSession,
+        this.provider,
+        this.config.modelName,
+        "Main"
+      ),
+      this.runCrossReview(
+        thinkResult,
+        mainResult,
+        secondarySession,
+        this.thinkProvider || this.provider,
+        this.config.thinkModelName || this.config.modelName,
+        "Think"
+      ),
+    ]);
+
     this.bus.publishOutbound({
       channel: msg.channel,
       chatId: msg.chatId,
       content: `🤖 Main Agent Review:\n${mainReview}`,
     });
-
-    // Cross-review: Think reviews Main
-    const thinkReview = await this.runCrossReview(
-      thinkResult,
-      mainResult,
-      secondarySession,
-      this.thinkProvider || this.provider,
-      this.config.thinkModelName || this.config.modelName,
-      "Think"
-    );
     this.bus.publishOutbound({
       channel: msg.channel,
       chatId: msg.chatId,
@@ -350,8 +389,8 @@ export class AgentLoop {
 
     // Dynamic logging & micro-consolidation in background
     this.context.memory.appendHistory(`[USER]: ${userMessage}\n[REESE]: ${reply}`);
-    this.triggerMicroConsolidation(userMessage, reply).catch(console.error);
-    this.triggerBackgroundConsolidation(session.key, session).catch(console.error);
+    this.triggerMicroConsolidation(userMessage, reply, session.key);
+    this.triggerBackgroundConsolidation(session.key, session);
 
     return reply || "(no response)";
   }
@@ -396,7 +435,7 @@ export class AgentLoop {
 
     // Dynamic logging in background
     this.context.memory.appendHistory(`[SYSTEM REVIEW]: ${reviewPrompt}\n[REESE REVIEW]: ${reply}`);
-    this.triggerBackgroundConsolidation(session.key, session).catch(console.error);
+    this.triggerBackgroundConsolidation(session.key, session);
 
     return reply || "(no review)";
   }
@@ -520,8 +559,8 @@ export class AgentLoop {
 
     // Dynamic logging & micro-consolidation in background asynchronously
     this.context.memory.appendHistory(`[USER]: ${actualContent}\n[REESE]: ${reply}`);
-    this.triggerMicroConsolidation(actualContent, reply).catch(console.error);
-    this.triggerBackgroundConsolidation(key, session).catch(console.error);
+    this.triggerMicroConsolidation(actualContent, reply, key);
+    this.triggerBackgroundConsolidation(key, session);
 
     // If message tool sent mid-turn, don't send final response again
     if (messageTool?.hasSentInTurn) {
@@ -576,60 +615,45 @@ export class AgentLoop {
 
   selectToolsForMessage(message: string): ToolRegistry {
     const registry = new ToolRegistry();
-    
-    // Always register message and spawn
-    const messageTool = this.tools.get("message");
-    if (messageTool) registry.register(messageTool);
-    const spawnTool = this.tools.get("spawn");
-    if (spawnTool) registry.register(spawnTool);
 
-    const msgLower = message.toLowerCase();
+    const addByName = (name: string) => {
+      const tool = this.tools.get(name);
+      if (tool) registry.register(tool);
+    };
 
-    // Check for web keywords
-    const hasWeb = /http|https|url|web|search|google|fetch|browse|download/i.test(msgLower);
-    if (hasWeb) {
-      const webFetch = this.tools.get("web_fetch");
-      if (webFetch) registry.register(webFetch);
-      const webSearch = this.tools.get("web_search");
-      if (webSearch) registry.register(webSearch);
-    }
+    for (const name of this.alwaysToolNames) addByName(name);
 
-    // Check for file system keywords
-    const hasFile = /file|dir|folder|path|read|write|edit|create|list|ls|grep|glob|find|cat|mkdir\b|\w+\.\w+/i.test(msgLower);
-    if (hasFile) {
-      const readFile = this.tools.get("read_file");
-      if (readFile) registry.register(readFile);
-      const writeFile = this.tools.get("write_file");
-      if (writeFile) registry.register(writeFile);
-      const editFile = this.tools.get("edit_file");
-      if (editFile) registry.register(editFile);
-      const listDir = this.tools.get("list_dir");
-      if (listDir) registry.register(listDir);
-      const grep = this.tools.get("grep");
-      if (grep) registry.register(grep);
-      const glob = this.tools.get("glob");
-      if (glob) registry.register(glob);
-    }
-
-    // Check for shell keywords
-    const hasShell = /bash|terminal|shell|command|run|execute|install|npm|bun|pip|yarn|cargo|git|cmd|sh\b/i.test(msgLower);
-    if (hasShell) {
-      const exec = this.tools.get("exec");
-      if (exec) registry.register(exec);
+    for (const bucket of this.toolBuckets) {
+      if (bucket.keywords.test(message)) {
+        for (const name of bucket.toolNames) addByName(name);
+      }
     }
 
     return registry;
   }
 
-  private async triggerBackgroundConsolidation(key: string, session: Session): Promise<void> {
+  /**
+   * Schedule (debounced + serialized) a background consolidation pass.
+   * Multiple calls within the debounce window collapse into one trailing run,
+   * so a burst of messages produces a single consolidation rather than N.
+   */
+  private triggerBackgroundConsolidation(key: string, session: Session): void {
+    if (session.messages.length - session.lastConsolidated < 6) return;
+
+    this.bgQueue.schedule(
+      `consolidation:${key}`,
+      () => this.runBackgroundConsolidation(key, session),
+      CONSOLIDATION_DEBOUNCE_MS,
+    );
+  }
+
+  private async runBackgroundConsolidation(key: string, session: Session): Promise<void> {
     const logger = Logger.get();
     const unconsolidatedCount = session.messages.length - session.lastConsolidated;
-    
-    // Threshold is 6 turns
     if (unconsolidatedCount < 6) return;
 
-    logger.info("Consolidation", `Triggering background consolidation for ${key} (unconsolidated count: ${unconsolidatedCount})`);
-    
+    logger.info("Consolidation", `Running background consolidation for ${key} (unconsolidated count: ${unconsolidatedCount})`);
+
     const newLastConsolidated = session.messages.length;
     const historyToConsolidate = session.messages.slice(session.lastConsolidated, newLastConsolidated);
 
@@ -638,12 +662,12 @@ export class AgentLoop {
       .map((m) => `[${m.role.toUpperCase()}]: ${m.content}`)
       .join("\n");
 
-    const systemPrompt = 
+    const systemPrompt =
       "You are a conversation summarizer. Your job is to update a running conversation summary with the details of the most recent turns.\n" +
       "Provide a highly compact, cohesive summary of the entire conversation so far.\n" +
       "Highlight important context, tasks currently in progress, and decisions. Avoid conversational fluff. Keep it under 250 words.";
 
-    const userPrompt = 
+    const userPrompt =
       `Existing Summary:\n${session.compactContext || "(No summary yet)"}\n\n` +
       `New Turns:\n${formattedTurns}`;
 
@@ -668,44 +692,38 @@ export class AgentLoop {
   }
 
   private shouldTriggerMicroConsolidation(userMsg: string, agentReply: string): boolean {
-    const memoryTriggers = [
-      "remember that",
-      "never forget",
-      "memorize",
-      "write down",
-      "remember to",
-      "save to memory",
-      "note down",
-      "keep in mind",
-      "my name is",
-      "i prefer",
-      "my preference",
-    ];
-    const msgLower = userMsg.toLowerCase();
-    const triggerMatched = memoryTriggers.some(trigger => msgLower.includes(trigger));
-    
-    const agentLower = agentReply.toLowerCase();
-    const agentMatched = agentLower.includes("remember") && (agentLower.includes("added") || agentLower.includes("saved") || agentLower.includes("will"));
-
-    return triggerMatched || agentMatched;
+    if (MICRO_CONSOLIDATION_TRIGGERS.some((re) => re.test(userMsg))) return true;
+    // Agent self-reports an action: stricter than the previous heuristic so we
+    // don't fire on every casual "I'll remember…" reply.
+    return /\b(added|saved|noted|stored)\b[^.\n]{0,40}\b(memory|note|fact)\b/i.test(agentReply);
   }
 
-  private async triggerMicroConsolidation(userMsg: string, agentReply: string): Promise<void> {
-    if (!this.shouldTriggerMicroConsolidation(userMsg, agentReply)) {
-      return;
-    }
+  /** Debounced, serialized variant of micro-consolidation. */
+  private triggerMicroConsolidation(userMsg: string, agentReply: string, sessionKey: string): void {
+    if (!this.shouldTriggerMicroConsolidation(userMsg, agentReply)) return;
 
+    this.bgQueue.schedule(
+      `micro:${sessionKey}`,
+      () => this.runMicroConsolidation(userMsg, agentReply),
+      // Short debounce — micro-consolidation should still feel responsive when
+      // the user explicitly asks to "remember X". 5s is enough to coalesce a
+      // multi-message burst from the same trigger.
+      5_000,
+    );
+  }
+
+  private async runMicroConsolidation(userMsg: string, agentReply: string): Promise<void> {
     const logger = Logger.get();
     logger.info("MicroConsolidation", "Memory trigger detected. Running micro-consolidation.");
 
     const currentMemory = this.context.memory.readMemory() || "(empty)";
-    const systemPrompt = 
+    const systemPrompt =
       "You are a precise memory consolidation assistant. Your task is to analyze the recent user-assistant interaction and extract a single, concise atomic fact (or a few key facts) that the user wanted the assistant to remember.\n" +
       "If the interaction does not contain new persistent information to remember, output nothing (empty response).\n" +
       "If there is a new fact, output the updated MEMORY.md content directly, merging/updating the new fact surgically. " +
       "Do NOT add conversational explanation. Output ONLY the updated markdown memory.";
 
-    const userPrompt = 
+    const userPrompt =
       `Current MEMORY.md:\n${currentMemory}\n\n` +
       `Recent Interaction:\n[USER]: ${userMsg}\n[REESE]: ${agentReply}`;
 

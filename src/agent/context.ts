@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { MemoryStore } from "./memory.js";
 import { SkillsLoader } from "./skills.js";
@@ -8,9 +8,18 @@ const BOOTSTRAP_FILES = ["USER.md"];
 const MAX_RECENT_HISTORY = 10;
 const RUNTIME_TAG = "[Runtime Context]";
 
+interface SystemPromptCache {
+  /** Cache key — when this matches, the cached prompt is still valid. */
+  key: string;
+  /** Hour bucket the cached prompt was built for. */
+  hourBucket: number;
+  prompt: string;
+}
+
 export class ContextBuilder {
   readonly memory: MemoryStore;
   readonly skills: SkillsLoader;
+  private promptCache = new Map<string, SystemPromptCache>();
 
   constructor(private workspaceDir: string) {
     this.memory = new MemoryStore(workspaceDir);
@@ -18,6 +27,51 @@ export class ContextBuilder {
   }
 
   buildSystemPrompt(channel?: string): string {
+    // Cache key: per channel, invalidated when any input file changes, when
+    // skills change, or when the dream cursor advances. We don't include the
+    // exact current time — the identity block embeds a localized "now", but
+    // that only meaningfully changes hour-by-hour, so we bucket by the hour.
+    const key = this.promptKey(channel);
+    const hourBucket = Math.floor(Date.now() / 3_600_000);
+    const cacheKey = channel ?? "__default__";
+    const cached = this.promptCache.get(cacheKey);
+    if (cached && cached.key === key && cached.hourBucket === hourBucket) {
+      return cached.prompt;
+    }
+
+    const prompt = this.buildSystemPromptUncached(channel);
+    this.promptCache.set(cacheKey, { key, hourBucket, prompt });
+    return prompt;
+  }
+
+  /** Composite signature of all inputs that flow into the system prompt. */
+  private promptKey(channel?: string): string {
+    const userMd = this.fileMtime(join(this.workspaceDir, "USER.md"));
+    const memMd = this.fileMtime(this.memory.memoryFilePath);
+    const dreamCursor = this.memory.getLastDreamCursor();
+    // Latest history cursor — bumps when new lines are appended.
+    const all = this.memory.readAllHistory();
+    const lastCursor = all.length ? all[all.length - 1].cursor : 0;
+    const skillsRev = this.skills.revision();
+    return [
+      channel ?? "",
+      `u:${userMd}`,
+      `m:${memMd}`,
+      `d:${dreamCursor}`,
+      `h:${lastCursor}`,
+      `s:${skillsRev}`,
+    ].join("|");
+  }
+
+  private fileMtime(fp: string): number {
+    try {
+      return existsSync(fp) ? statSync(fp).mtimeMs : -1;
+    } catch {
+      return -1;
+    }
+  }
+
+  private buildSystemPromptUncached(channel?: string): string {
     const parts: string[] = [];
 
     // Core identity

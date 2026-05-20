@@ -3,6 +3,7 @@ import {
   writeFileSync,
   existsSync,
   appendFileSync,
+  statSync,
 } from "node:fs";
 import { workspacePaths } from "../config/paths.js";
 import type { LLMProvider } from "../providers/base.js";
@@ -16,10 +17,19 @@ export interface HistoryEntry {
 /** Pure file I/O layer for all memory files. */
 export class MemoryStore {
   private paths: ReturnType<typeof workspacePaths>;
+  /** In-memory cache of parsed history.jsonl entries, kept in cursor order. */
+  private historyCache: HistoryEntry[] | null = null;
+  /** mtimeMs of history.jsonl when historyCache was loaded. */
+  private historyCacheMtime = -1;
 
   constructor(private workspaceDir: string) {
     this.paths = workspacePaths(workspaceDir);
   }
+
+  /** Resolved path to MEMORY.md. */
+  get memoryFilePath(): string { return this.paths.memoryFile; }
+  /** Resolved path to history.jsonl. */
+  get historyFilePath(): string { return this.paths.historyFile; }
 
   readFile(path: string): string {
     try { return readFileSync(path, "utf-8"); }
@@ -43,20 +53,54 @@ export class MemoryStore {
     const record: HistoryEntry = { cursor, timestamp: ts, content: entry.trim() };
     appendFileSync(this.paths.historyFile, JSON.stringify(record) + "\n", "utf-8");
     writeFileSync(this.paths.cursorFile, String(cursor), "utf-8");
+    // Keep the in-memory cache hot so the next read doesn't have to re-parse
+    // the whole file. Sync mtime to the new file mtime if available.
+    if (this.historyCache) {
+      this.historyCache.push(record);
+      try {
+        this.historyCacheMtime = statSync(this.paths.historyFile).mtimeMs;
+      } catch { /* ignore */ }
+    }
     return cursor;
   }
 
+  /**
+   * Read all history entries. Re-parses from disk only when history.jsonl has
+   * changed since the last read (mtime-keyed). Subsequent calls in the same
+   * second can hit memory directly.
+   */
   readAllHistory(): HistoryEntry[] {
-    if (!existsSync(this.paths.historyFile)) return [];
-    return readFileSync(this.paths.historyFile, "utf-8")
+    if (!existsSync(this.paths.historyFile)) {
+      this.historyCache = [];
+      this.historyCacheMtime = -1;
+      return this.historyCache;
+    }
+    let mtime = -1;
+    try {
+      mtime = statSync(this.paths.historyFile).mtimeMs;
+    } catch { /* fall through to re-read */ }
+    if (this.historyCache && mtime === this.historyCacheMtime) {
+      return this.historyCache;
+    }
+    const entries = readFileSync(this.paths.historyFile, "utf-8")
       .split("\n")
       .filter(Boolean)
       .map((l) => { try { return JSON.parse(l) as HistoryEntry; } catch { return null; } })
       .filter((e): e is HistoryEntry => e !== null);
+    this.historyCache = entries;
+    this.historyCacheMtime = mtime;
+    return entries;
   }
 
   readUnprocessedHistory(sinceC: number): HistoryEntry[] {
-    return this.readAllHistory().filter((e) => e.cursor > sinceC);
+    const all = this.readAllHistory();
+    // Entries are appended monotonically; do a tail scan rather than full filter
+    // when the unprocessed slice is small (the common case).
+    if (!all.length || all[all.length - 1].cursor <= sinceC) return [];
+    // Find first index where cursor > sinceC. Linear from the end is cheap.
+    let i = all.length - 1;
+    while (i > 0 && all[i - 1].cursor > sinceC) i--;
+    return all.slice(i);
   }
 
   getLastCursor(): number {
@@ -124,32 +168,6 @@ export class Consolidator {
       // Raw archive as fallback
       this.store.appendHistory(`[RAW] ${formatted.slice(0, 1000)}`);
     }
-  }
-
-  /** Check if session is over token budget and archive old messages. */
-  async maybeConsolidate(
-    session: SessionLike,
-    contextWindowTokens: number,
-    maxTokens: number
-  ): Promise<void> {
-    const budget = contextWindowTokens - maxTokens - 1024;
-    const estimated = this.estimateTokens(session.messages);
-    if (estimated <= budget) return;
-
-    // Archive half of unconsolidated messages
-    const start = session.lastConsolidated;
-    const toArchive = session.messages.slice(start, Math.floor((start + session.messages.length) / 2));
-    if (!toArchive.length) return;
-
-    await this.archive(toArchive);
-    session.lastConsolidated = start + toArchive.length;
-  }
-
-  private estimateTokens(messages: SessionLike["messages"]): number {
-    return messages.reduce((sum, m) => {
-      const c = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
-      return sum + Math.ceil(c.length / 3.5) + 4;
-    }, 0);
   }
 }
 
