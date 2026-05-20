@@ -4,15 +4,12 @@ import type { AgentLoop } from "../agent/loop.js";
 /** Spawn a background subagent to run a focused task. */
 export class SpawnTool implements Tool {
   readonly name = "spawn";
-  readonly description =
-    "Spawn a background subagent to run a focused, isolated task. " +
-    "The subagent runs concurrently and posts its result back when done. " +
-    "Use this to parallelize work or delegate long-running tasks.";
+  readonly description = "Spawn a background subagent for an isolated task. Result posts back when done.";
   readonly parameters = {
     type: "object",
     properties: {
-      task: { type: "string", description: "The task description for the subagent" },
-      context: { type: "string", description: "Optional context or files to give the subagent" },
+      task: { type: "string", description: "Task description" },
+      context: { type: "string", description: "Optional context" },
     },
     required: ["task"],
   };

@@ -1,6 +1,7 @@
 import type { LLMProvider, ChatMessage, ToolCallRequest } from "../providers/base.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { AgentHook, type AgentHookContext, stripThink } from "./hook.js";
+import { ContextBuilder } from "./context.js";
 import { Logger } from "../logger.js";
 
 interface RunSpec {
@@ -23,7 +24,11 @@ interface RunResult {
 
 const MAX_EMPTY_RETRIES = 2;
 const MAX_LENGTH_RECOVERIES = 3;
-const MICROCOMPACT_KEEP_RECENT = 10;
+/** Number of recent stale tool results to keep verbatim. Older ones get
+ * collapsed to a tombstone. Lowered from 10 to 4 to fit small-context models. */
+const MICROCOMPACT_KEEP_RECENT = 4;
+/** Tool results below this size are not worth compacting (the tombstone is ~50 chars). */
+const MICROCOMPACT_MIN_BYTES = 200;
 const COMPACTABLE_TOOLS = new Set(["read_file", "exec", "grep", "glob", "list_dir", "web_search", "web_fetch"]);
 
 function isBlank(s: string | null | undefined): boolean {
@@ -89,6 +94,9 @@ export class AgentRunner {
         const textCalls = parseTextToolCalls(response.content);
         if (textCalls.length > 0) {
           toolCalls = textCalls;
+          // Provider needs the fallback hint going forward; future system
+          // prompts will include the inline-call format reminder.
+          ContextBuilder.fallbackHintNeeded = true;
         }
       }
       ctx.toolCalls = toolCalls;
@@ -206,7 +214,7 @@ export class AgentRunner {
     const result = messages.map((m, i) => {
       if (!stale.includes(i)) return m;
       const content = typeof m.content === "string" ? m.content : "";
-      if (content.length < 500) return m;
+      if (content.length < MICROCOMPACT_MIN_BYTES) return m;
       const name = (m as ChatMessage & { name?: string }).name ?? "tool";
       return { ...m, content: `[${name} result omitted from context]` };
     });

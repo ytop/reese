@@ -11,17 +11,16 @@ import type { Tool } from "./base.js";
 
 export class GrepTool implements Tool {
   readonly name = "grep";
-  readonly description =
-    "Search for a regex pattern in files. Returns matching lines with file:line format.";
+  readonly description = "Regex search in files. Returns file:line matches.";
   readonly concurrencySafe = true;
   readonly parameters = {
     type: "object",
     properties: {
-      pattern: { type: "string", description: "Regex pattern to search for" },
-      path: { type: "string", description: "File or directory to search in" },
-      recursive: { type: "boolean", description: "Search subdirectories (default true)" },
-      case_insensitive: { type: "boolean", description: "Case insensitive (default false)" },
-      max_results: { type: "number", description: "Max results (default 50)", minimum: 1 },
+      pattern: { type: "string", description: "Regex" },
+      path: { type: "string", description: "File or dir" },
+      recursive: { type: "boolean", description: "Recurse" },
+      case_insensitive: { type: "boolean", description: "Case-insensitive" },
+      max_results: { type: "number", description: "Max results", minimum: 1 },
     },
     required: ["pattern", "path"],
   };
@@ -93,16 +92,14 @@ export class GrepTool implements Tool {
 
 export class GlobTool implements Tool {
   readonly name = "glob";
-  readonly description =
-    "Find files matching a glob pattern (uses simple recursive scan). " +
-    "Patterns: *.ts, **/*.md, src/**/*.ts";
+  readonly description = "Find files by glob pattern (e.g. **/*.ts).";
   readonly concurrencySafe = true;
   readonly parameters = {
     type: "object",
     properties: {
-      pattern: { type: "string", description: "Glob-like pattern to match" },
-      path: { type: "string", description: "Base directory (default: workspace)" },
-      max_results: { type: "number", description: "Max results (default 100)", minimum: 1 },
+      pattern: { type: "string", description: "Glob pattern" },
+      path: { type: "string", description: "Base dir" },
+      max_results: { type: "number", description: "Max results", minimum: 1 },
     },
     required: ["pattern"],
   };

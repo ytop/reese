@@ -5,8 +5,11 @@ import { SkillsLoader } from "./skills.js";
 import type { ChatMessage } from "../providers/base.js";
 
 const BOOTSTRAP_FILES = ["USER.md"];
-const MAX_RECENT_HISTORY = 10;
+/** Verbatim history kept when no compactContext exists. With a summary, drop to 2. */
+const MAX_RECENT_HISTORY = 6;
 const RUNTIME_TAG = "[Runtime Context]";
+/** Default soft-cap for the system prompt in CHARACTERS. Overridden via config. */
+const DEFAULT_BUDGET_CHARS = 3000;
 
 interface SystemPromptCache {
   /** Cache key — when this matches, the cached prompt is still valid. */
@@ -16,22 +19,33 @@ interface SystemPromptCache {
   prompt: string;
 }
 
+export interface BuildOptions {
+  /** Soft cap on system prompt size in chars. Defaults to DEFAULT_BUDGET_CHARS. */
+  budgetChars?: number;
+  /** Inject the text-tool-call fallback hint. Off unless the runner has needed it. */
+  withFallbackHint?: boolean;
+}
+
 export class ContextBuilder {
   readonly memory: MemoryStore;
   readonly skills: SkillsLoader;
   private promptCache = new Map<string, SystemPromptCache>();
+  /** Set by the runner when text-tool-call fallback was actually used. */
+  static fallbackHintNeeded = false;
 
   constructor(private workspaceDir: string) {
     this.memory = new MemoryStore(workspaceDir);
     this.skills = new SkillsLoader(workspaceDir);
   }
 
-  buildSystemPrompt(channel?: string): string {
+  buildSystemPrompt(channel?: string, opts: BuildOptions = {}): string {
     // Cache key: per channel, invalidated when any input file changes, when
     // skills change, or when the dream cursor advances. We don't include the
     // exact current time — the identity block embeds a localized "now", but
     // that only meaningfully changes hour-by-hour, so we bucket by the hour.
-    const key = this.promptKey(channel);
+    const key = this.promptKey(channel) +
+      `|b:${opts.budgetChars ?? DEFAULT_BUDGET_CHARS}` +
+      `|f:${opts.withFallbackHint ? 1 : 0}`;
     const hourBucket = Math.floor(Date.now() / 3_600_000);
     const cacheKey = channel ?? "__default__";
     const cached = this.promptCache.get(cacheKey);
@@ -39,7 +53,7 @@ export class ContextBuilder {
       return cached.prompt;
     }
 
-    const prompt = this.buildSystemPromptUncached(channel);
+    const prompt = this.buildSystemPromptUncached(channel, opts);
     this.promptCache.set(cacheKey, { key, hourBucket, prompt });
     return prompt;
   }
@@ -71,137 +85,122 @@ export class ContextBuilder {
     }
   }
 
-  private buildSystemPromptUncached(channel?: string): string {
+  private buildSystemPromptUncached(channel?: string, opts: BuildOptions = {}): string {
+    const BUDGET_LIMIT = opts.budgetChars ?? DEFAULT_BUDGET_CHARS;
     const parts: string[] = [];
 
-    // Core identity
-    parts.push(this.buildIdentity(channel));
+    // Core identity (lean)
+    const identity = this.buildIdentity(channel);
+    parts.push(identity);
 
-    // Bootstrap files
+    // Bootstrap files (USER.md). Pre-cap at 1000 chars so a long USER.md doesn't
+    // dominate; user can opt into more by trimming the file.
     let bootstrap = this.loadBootstrapFiles();
+    if (bootstrap.length > 1000) bootstrap = bootstrap.slice(0, 1000) + "\n…[user.md truncated]";
 
-    // Long-term memory
-    const mem = this.memory.getMemoryContext();
+    // Long-term memory (capped). Same idea.
+    let mem = this.memory.getMemoryContext();
+    if (mem.length > 800) mem = mem.slice(0, 800) + "\n…[memory truncated]";
 
-    // Always-on skills
+    // Always-on skills inline content (rarely populated; capped).
     let activeSkillsContent = "";
     const alwaysSkills = this.skills.getAlwaysSkills();
     if (alwaysSkills.length) {
       activeSkillsContent = this.skills.loadSkillsForContext(alwaysSkills);
+      if (activeSkillsContent.length > 800) {
+        activeSkillsContent = activeSkillsContent.slice(0, 800) + "\n…[skills truncated]";
+      }
     }
 
-    // Skills summary XML
-    let skillsSummary = this.skills.buildSkillsSummary();
+    // Compact skills summary by default (one line per available skill).
+    let skillsSummary = this.buildCompactSkillsSummary();
 
-    // Recent unprocessed history (bridge entries)
+    // Recent history bridge: only include when there's no compactContext flowing
+    // through buildCompactMessages. The caller signals that via withFallbackHint
+    // — but to avoid coupling, just keep this short and let dynamic trimming
+    // drop it first when over budget.
     const lastDreamC = this.memory.getLastDreamCursor();
     const recent = this.memory.readUnprocessedHistory(lastDreamC);
     let recentHistoryContent = "";
     if (recent.length) {
       const capped = recent.slice(-MAX_RECENT_HISTORY);
       recentHistoryContent = capped.map((e) => `- [${e.timestamp}] ${e.content}`).join("\n");
+      if (recentHistoryContent.length > 800) {
+        recentHistoryContent = recentHistoryContent.slice(0, 800) + "\n…[history truncated]";
+      }
     }
 
-    // Text tool call fallback notification
-    const fallbackFormat =
-      "## Fallback Tool Calling Format\n" +
-      "If you need to call a tool but standard function calling is unavailable or failing, " +
-      "you can output the call inside your response text using one of these formats:\n" +
-      "- `[CALL: tool_name {\"arg\": \"val\"}]`\n" +
-      "- `CALL: tool_name(arg=\"val\")`";
+    // Fallback tool-call boilerplate — only when the runner has actually needed
+    // it in the past. Saves ~280 chars/turn for the common case.
+    const fallbackFormat = (opts.withFallbackHint || ContextBuilder.fallbackHintNeeded)
+      ? "## Fallback Tool Call\nIf native tool calling fails, output `[CALL: tool_name {\"arg\":\"val\"}]` in your reply."
+      : "";
 
-    // Dynamic budgeting based on length (budget: 8000 characters)
-    const BUDGET_LIMIT = 8000;
-    let totalLen =
-      this.buildIdentity(channel).length +
-      bootstrap.length +
-      mem.length +
-      activeSkillsContent.length +
-      skillsSummary.length +
-      recentHistoryContent.length +
-      fallbackFormat.length +
-      30;
+    const measure = () =>
+      identity.length + bootstrap.length + mem.length + activeSkillsContent.length +
+      skillsSummary.length + recentHistoryContent.length + fallbackFormat.length + 30;
 
-    if (totalLen > BUDGET_LIMIT) {
-      // 1. Trim skillsSummary: build a super compact skills list
-      if (skillsSummary) {
-        const skills = this.skills.listSkills();
-        const compactLines = ["<skills>"];
-        for (const entry of skills) {
-          const meta = this.skills.getSkillMeta(entry.name);
-          const available = this.skills.isAvailable(meta);
-          if (available) {
-            compactLines.push(`  <skill><name>${entry.name}</name><desc>${meta.description || ""}</desc></skill>`);
-          }
-        }
-        compactLines.push("</skills>");
-        skillsSummary = compactLines.join("\n");
-      }
+    let totalLen = measure();
 
-      totalLen =
-        this.buildIdentity(channel).length +
-        bootstrap.length +
-        mem.length +
-        activeSkillsContent.length +
-        skillsSummary.length +
-        recentHistoryContent.length +
-        fallbackFormat.length +
-        30;
-
-      // 2. Trim activeSkillsContent
-      if (totalLen > BUDGET_LIMIT && activeSkillsContent) {
-        activeSkillsContent = activeSkillsContent.slice(0, 1500) + "\n... [truncated due to context limit]";
-        totalLen =
-          this.buildIdentity(channel).length +
-          bootstrap.length +
-          mem.length +
-          activeSkillsContent.length +
-          skillsSummary.length +
-          recentHistoryContent.length +
-          fallbackFormat.length +
-          30;
-      }
-
-      // 3. Trim bootstrap
-      if (totalLen > BUDGET_LIMIT && bootstrap) {
-        bootstrap = bootstrap.slice(0, 1500) + "\n... [truncated due to context limit]";
-      }
+    // Progressive trimming. Drop redundant pieces first.
+    if (totalLen > BUDGET_LIMIT && recentHistoryContent) {
+      recentHistoryContent = ""; // covered by compactContext / verbatim history
+      totalLen = measure();
+    }
+    if (totalLen > BUDGET_LIMIT && activeSkillsContent) {
+      activeSkillsContent = activeSkillsContent.slice(0, 400) + "\n…[truncated]";
+      totalLen = measure();
+    }
+    if (totalLen > BUDGET_LIMIT && bootstrap) {
+      bootstrap = bootstrap.slice(0, 500) + "\n…[truncated]";
+      totalLen = measure();
+    }
+    if (totalLen > BUDGET_LIMIT && mem) {
+      mem = mem.slice(0, 400) + "\n…[truncated]";
+      totalLen = measure();
+    }
+    if (totalLen > BUDGET_LIMIT && skillsSummary) {
+      // Drop everything but the names line.
+      skillsSummary = this.skills
+        .listSkills()
+        .filter((e) => this.skills.isAvailable(this.skills.getSkillMeta(e.name)))
+        .map((e) => e.name)
+        .join(",");
+      if (skillsSummary) skillsSummary = `Skills: ${skillsSummary}`;
     }
 
     if (bootstrap) parts.push(bootstrap);
-    if (mem) parts.push(`# Memory\n\n${mem}`);
-    if (activeSkillsContent) parts.push(`# Active Skills\n\n${activeSkillsContent}`);
-    if (skillsSummary) {
-      parts.push(
-        `# Available Skills\n\nYou have access to the following skills. ` +
-        `Use read_file on the <location> path to get full instructions when needed.\n\n${skillsSummary}`
-      );
-    }
-    if (recentHistoryContent) {
-      parts.push("# Recent History\n\n" + recentHistoryContent);
-    }
-    parts.push(fallbackFormat);
+    if (mem) parts.push(mem);
+    if (activeSkillsContent) parts.push(activeSkillsContent);
+    if (skillsSummary) parts.push(skillsSummary);
+    if (recentHistoryContent) parts.push("# Recent\n" + recentHistoryContent);
+    if (fallbackFormat) parts.push(fallbackFormat);
 
-    return parts.join("\n\n---\n\n");
+    return parts.join("\n\n");
+  }
+
+  /** One-line-per-skill summary. Drops <location> and <requires>. */
+  private buildCompactSkillsSummary(): string {
+    const skills = this.skills.listSkills();
+    if (!skills.length) return "";
+    const lines: string[] = ["Skills:"];
+    for (const entry of skills) {
+      const meta = this.skills.getSkillMeta(entry.name);
+      if (!this.skills.isAvailable(meta)) continue;
+      const desc = (meta.description ?? "").slice(0, 80);
+      lines.push(`- ${entry.name}: ${desc}`);
+    }
+    if (lines.length === 1) return "";
+    lines.push("(load via read_file on skills/<name>/SKILL.md)");
+    return lines.join("\n");
   }
 
   private buildIdentity(channel?: string): string {
     const now = new Date().toLocaleString("en-US", { timeZoneName: "short" });
     return (
-      `You are Reese, a personal AI assistant.\n` +
-      `Current time: ${now}\n` +
-      `Channel: ${channel ?? "cli"}\n` +
-      `Workspace: ${this.workspaceDir}\n\n` +
-      `## Core Principles\n` +
-      `- Be helpful, honest, and direct\n` +
-      `- Use tools proactively to get things done\n` +
-      `- Store important facts in memory files\n` +
-      `- Load skill files when you need specialized guidance\n` +
-      `- Keep responses concise unless detail is needed\n\n` +
-      `You can use tools to read/write files, execute shell commands, search the web, ` +
-      `and more. You have a persistent memory system — important facts are stored in ` +
-      `markdown files in the workspace. Skills are instruction files that teach you ` +
-      `how to perform specific tasks.`
+      `You are Reese, a personal AI assistant. Time:${now} channel:${channel ?? "cli"}.\n` +
+      `Use tools to act. Persist facts to MEMORY.md. Reply concisely. ` +
+      `Wrap private reasoning in <think>…</think>; the user only sees text outside it.`
     );
   }
 
@@ -218,20 +217,21 @@ export class ContextBuilder {
   }
 
   static buildRuntimeContext(channel?: string, chatId?: string): string {
+    // Compact one-liner. Was 4 separate lines.
     const now = new Date().toISOString();
-    const lines = [`${RUNTIME_TAG}`, `Current Time: ${now}`];
-    if (channel) lines.push(`Channel: ${channel}`);
-    if (chatId) lines.push(`Chat ID: ${chatId}`);
-    return lines.join("\n");
+    const bits = [`t=${now}`];
+    if (channel) bits.push(`ch=${channel}`);
+    if (chatId) bits.push(`cid=${chatId}`);
+    return `${RUNTIME_TAG} ${bits.join(" ")}`;
   }
 
   buildMessages(
     history: ChatMessage[],
     currentMessage: string,
-    opts?: { channel?: string; chatId?: string; currentRole?: "user" | "assistant" }
+    opts?: { channel?: string; chatId?: string; currentRole?: "user" | "assistant"; budgetChars?: number }
   ): ChatMessage[] {
-    const { channel, chatId, currentRole = "user" } = opts ?? {};
-    const systemPrompt = this.buildSystemPrompt(channel);
+    const { channel, chatId, currentRole = "user", budgetChars } = opts ?? {};
+    const systemPrompt = this.buildSystemPrompt(channel, { budgetChars });
     const runtime = ContextBuilder.buildRuntimeContext(channel, chatId);
     const merged = `${runtime}\n\n${currentMessage}`;
 
@@ -253,27 +253,32 @@ export class ContextBuilder {
 
   /**
    * Build a minimal message array using compact context and verbatim recent history.
+   * When a compactContext summary is present, drops verbatim history sharply
+   * (it would just re-ship the same information).
    */
   buildCompactMessages(
     compactContext: string | undefined,
     recentHistory: ChatMessage[],
     currentMessage: string,
-    opts?: { channel?: string; chatId?: string }
+    opts?: { channel?: string; chatId?: string; budgetChars?: number }
   ): ChatMessage[] {
-    const { channel, chatId } = opts ?? {};
-    const systemPrompt = this.buildSystemPrompt(channel);
+    const { channel, chatId, budgetChars } = opts ?? {};
+    const systemPrompt = this.buildSystemPrompt(channel, { budgetChars });
 
     const runtime = ContextBuilder.buildRuntimeContext(channel, chatId);
     const userContent = compactContext
-      ? `${runtime}\n\n[Conversation summary context so far]:\n${compactContext}\n\n[New message]:\n${currentMessage}`
+      ? `${runtime}\n\n[Summary]:\n${compactContext}\n\n[New]:\n${currentMessage}`
       : `${runtime}\n\n${currentMessage}`;
 
     const messages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
     ];
 
+    // When we already have a compactContext summary, ship at most 2 raw turns
+    // for short-term continuity. Without a summary, keep up to 6 raw turns.
+    const tail = compactContext ? 2 : 6;
     if (recentHistory && recentHistory.length > 0) {
-      messages.push(...recentHistory.slice(-10));
+      messages.push(...recentHistory.slice(-tail));
     }
 
     messages.push({ role: "user", content: userContent });

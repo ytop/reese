@@ -4,15 +4,13 @@ import type { Tool } from "./base.js";
 
 export class WebFetchTool implements Tool {
   readonly name = "web_fetch";
-  readonly description =
-    "Fetch the content of a URL and return it as plain text. " +
-    "Useful for reading documentation, articles, and APIs.";
+  readonly description = "Fetch a URL and return text content.";
   readonly concurrencySafe = true;
   readonly parameters = {
     type: "object",
     properties: {
-      url: { type: "string", description: "URL to fetch" },
-      max_chars: { type: "number", description: "Max characters to return (default 16000)" },
+      url: { type: "string", description: "URL" },
+      max_chars: { type: "number", description: "Max chars" },
     },
     required: ["url"],
   };
@@ -52,14 +50,13 @@ export class WebFetchTool implements Tool {
 
 export class WebSearchTool implements Tool {
   readonly name = "web_search";
-  readonly description =
-    "Search the web using DuckDuckGo and return a list of results with titles, URLs, and snippets.";
+  readonly description = "DuckDuckGo search. Returns title/url/snippet.";
   readonly concurrencySafe = true;
   readonly parameters = {
     type: "object",
     properties: {
-      query: { type: "string", description: "Search query" },
-      max_results: { type: "number", description: "Max results (default 5)", minimum: 1 },
+      query: { type: "string", description: "Query" },
+      max_results: { type: "number", description: "Max results", minimum: 1 },
     },
     required: ["query"],
   };

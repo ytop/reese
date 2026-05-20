@@ -3,15 +3,13 @@ import type { Tool } from "./base.js";
 
 export class ExecTool implements Tool {
   readonly name = "exec";
-  readonly description =
-    "Execute a shell command and return its stdout+stderr output. " +
-    "Use for running scripts, git commands, package managers, etc.";
+  readonly description = "Run a shell command and return stdout+stderr.";
   readonly parameters = {
     type: "object",
     properties: {
-      command: { type: "string", description: "Shell command to run" },
-      timeout: { type: "number", description: "Timeout in seconds (default 30)", minimum: 1 },
-      cwd: { type: "string", description: "Working directory (default: workspace)" },
+      command: { type: "string", description: "Shell command" },
+      timeout: { type: "number", description: "Timeout (s)", minimum: 1 },
+      cwd: { type: "string", description: "Working dir" },
     },
     required: ["command"],
   };

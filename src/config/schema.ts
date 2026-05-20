@@ -20,6 +20,10 @@ const ConfigSchema = z.object({
   MAX_ITERATIONS: z.coerce.number().int().positive().default(50),
   MAX_TOKENS: z.coerce.number().int().positive().default(8192),
   CONTEXT_WINDOW_TOKENS: z.coerce.number().int().positive().default(65536),
+  // Soft cap on the *outgoing* prompt size (system + history + user). Used by
+  // ContextBuilder to budget the system prompt. Defaults aim at ~2K tokens
+  // total for slow, small-context models.
+  MAX_PROMPT_TOKENS: z.coerce.number().int().positive().default(2000),
   MAX_TOOL_RESULT_CHARS: z.coerce.number().int().positive().default(16000),
   HEARTBEAT_INTERVAL_S: z.coerce.number().int().positive().default(1800),
 });
@@ -44,6 +48,7 @@ export interface AppConfig {
   maxIterations: number;
   maxTokens: number;
   contextWindowTokens: number;
+  maxPromptTokens: number;
   maxToolResultChars: number;
   heartbeatIntervalMs: number;
 }
@@ -71,6 +76,7 @@ export function loadConfig(): AppConfig {
     maxIterations: raw.MAX_ITERATIONS,
     maxTokens: raw.MAX_TOKENS,
     contextWindowTokens: raw.CONTEXT_WINDOW_TOKENS,
+    maxPromptTokens: raw.MAX_PROMPT_TOKENS,
     maxToolResultChars: raw.MAX_TOOL_RESULT_CHARS,
     heartbeatIntervalMs: raw.HEARTBEAT_INTERVAL_S * 1000,
   };

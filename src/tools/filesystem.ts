@@ -30,16 +30,14 @@ function resolvePath(path: string, workspaceDir: string, allowedDir?: string): s
 
 export class ReadFileTool implements Tool {
   readonly name = "read_file";
-  readonly description =
-    "Read a text file. Output format: LINE|CONTENT. " +
-    "Use offset and limit for large files. Reads exceeding ~128K chars are truncated.";
+  readonly description = "Read a text file (LINE|CONTENT). Use offset/limit for large files.";
   readonly concurrencySafe = true;
   readonly parameters = {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path to read" },
-      offset: { type: "number", description: "Start line (1-indexed, default 1)", minimum: 1 },
-      limit: { type: "number", description: "Max lines to read (default 2000)", minimum: 1 },
+      path: { type: "string", description: "File path" },
+      offset: { type: "number", description: "Start line, 1-indexed", minimum: 1 },
+      limit: { type: "number", description: "Max lines", minimum: 1 },
     },
     required: ["path"],
   };
@@ -82,13 +80,12 @@ export class ReadFileTool implements Tool {
 
 export class WriteFileTool implements Tool {
   readonly name = "write_file";
-  readonly description =
-    "Write content to a file. Overwrites if it exists; creates parent dirs as needed.";
+  readonly description = "Write content to a file (overwrites; creates parent dirs).";
   readonly parameters = {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path to write" },
-      content: { type: "string", description: "Content to write" },
+      path: { type: "string", description: "File path" },
+      content: { type: "string", description: "Content" },
     },
     required: ["path", "content"],
   };
@@ -131,16 +128,14 @@ function findMatch(content: string, oldText: string): [string | null, number] {
 export class EditFileTool implements Tool {
   readonly name = "edit_file";
   readonly description =
-    "Edit a file by replacing old_text with new_text. " +
-    "Tolerates minor whitespace differences. " +
-    "If old_text matches multiple times, set replace_all=true or add more context.";
+    "Replace old_text with new_text in a file. Set replace_all=true if old_text appears multiple times.";
   readonly parameters = {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path to edit" },
-      old_text: { type: "string", description: "Text to find and replace" },
-      new_text: { type: "string", description: "Replacement text" },
-      replace_all: { type: "boolean", description: "Replace all occurrences (default false)" },
+      path: { type: "string", description: "File path" },
+      old_text: { type: "string", description: "Text to find" },
+      new_text: { type: "string", description: "Replacement" },
+      replace_all: { type: "boolean", description: "Replace all matches" },
     },
     required: ["path", "old_text", "new_text"],
   };
@@ -181,16 +176,14 @@ const IGNORE_DIRS = new Set([
 
 export class ListDirTool implements Tool {
   readonly name = "list_dir";
-  readonly description =
-    "List directory contents. Set recursive=true to explore nested structure. " +
-    "Common noise dirs (.git, node_modules, etc.) are auto-ignored.";
+  readonly description = "List directory contents. Set recursive=true to descend.";
   readonly concurrencySafe = true;
   readonly parameters = {
     type: "object",
     properties: {
       path: { type: "string", description: "Directory path" },
-      recursive: { type: "boolean", description: "List recursively (default false)" },
-      max_entries: { type: "number", description: "Max entries to return (default 200)", minimum: 1 },
+      recursive: { type: "boolean", description: "Recurse" },
+      max_entries: { type: "number", description: "Max entries", minimum: 1 },
     },
     required: ["path"],
   };

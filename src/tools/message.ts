@@ -4,14 +4,11 @@ import type { OutboundMessage } from "../bus/events.js";
 /** Allows the agent to send messages mid-turn (progress updates). */
 export class MessageTool implements Tool {
   readonly name = "message";
-  readonly description =
-    "Send a message to the user mid-turn. " +
-    "Use this to provide progress updates, partial results, or ask a quick clarifying question " +
-    "without ending the current task.";
+  readonly description = "Send a mid-turn progress message to the user.";
   readonly parameters = {
     type: "object",
     properties: {
-      content: { type: "string", description: "Message text to send" },
+      content: { type: "string", description: "Message text" },
     },
     required: ["content"],
   };

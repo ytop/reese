@@ -118,7 +118,7 @@ export class AgentLoop {
 
   private toolBuckets: { keywords: RegExp; toolNames: string[] }[] = [];
   /** Tools that are always present regardless of message content. */
-  private alwaysToolNames: string[] = ["message", "spawn"];
+  private alwaysToolNames: string[] = ["message"];
 
   private registerTools(): void {
     const ws = this.config.workspaceDir;
@@ -136,18 +136,40 @@ export class AgentLoop {
 
     // Pre-compute keyword → tool buckets. selectToolsForMessage just OR's the
     // matching buckets together rather than rebuilding the registry per turn.
+    // Buckets are intentionally narrow — only ship schemas the model is
+    // likely to need for this turn.
     this.toolBuckets = [
       {
-        keywords: /http|https|url|web|search|google|fetch|browse|download/i,
-        toolNames: ["web_fetch", "web_search"],
+        keywords: /https?:|\bweb\b|\bfetch\b|\bbrowse\b|\bdownload\b/i,
+        toolNames: ["web_fetch"],
       },
       {
-        keywords: /file|dir|folder|path|read|write|edit|create|list|ls|grep|glob|find|cat|mkdir\b|\w+\.\w+/i,
-        toolNames: ["read_file", "write_file", "edit_file", "list_dir", "grep", "glob"],
+        keywords: /\bsearch\b|\bgoogle\b|\bduckduckgo\b|\blook\s*up\b/i,
+        toolNames: ["web_search"],
+      },
+      // Read-only filesystem (the most common need)
+      {
+        keywords: /\bread\b|\bview\b|\bshow\b|\bcat\b|\bopen\b|\bls\b|\blist\b|\bdir\b|\bfolder\b|\bcontents?\b|\w+\.\w+/i,
+        toolNames: ["read_file", "list_dir"],
+      },
+      // Write/edit (only when the user clearly intends to mutate)
+      {
+        keywords: /\bwrite\b|\bedit\b|\bmodify\b|\bupdate\b|\bcreate\b|\bappend\b|\breplace\b|\bsave\b/i,
+        toolNames: ["read_file", "write_file", "edit_file"],
+      },
+      // Code search
+      {
+        keywords: /\bgrep\b|\bsearch\b|\bfind\b|\bglob\b|\bpattern\b|\bregex\b|\boccurrences?\b/i,
+        toolNames: ["grep", "glob"],
       },
       {
-        keywords: /bash|terminal|shell|command|run|execute|install|npm|bun|pip|yarn|cargo|git|cmd|sh\b/i,
+        keywords: /\bbash\b|\bterminal\b|\bshell\b|\bcommand\b|\brun\b|\bexecute\b|\binstall\b|\bnpm\b|\bbun\b|\bpip\b|\byarn\b|\bcargo\b|\bgit\b|\bcmd\b|\bsh\b/i,
         toolNames: ["exec"],
+      },
+      // Subagent delegation only when explicitly invoked
+      {
+        keywords: /\bspawn\b|\bdelegate\b|\bsubagent\b|\bbackground\b|\bin\s*parallel\b/i,
+        toolNames: ["spawn"],
       },
     ];
   }
@@ -364,6 +386,7 @@ export class AgentLoop {
     const messages = this.context.buildCompactMessages(session.compactContext, history, userMessage, {
       channel: msg.channel,
       chatId: msg.chatId,
+      budgetChars: this.promptBudgetChars(),
     });
 
     const selectedTools = this.selectToolsForMessage(userMessage);
@@ -409,6 +432,7 @@ export class AgentLoop {
     const messages = this.context.buildCompactMessages(session.compactContext, history, reviewPrompt, {
       channel: "system",
       chatId: "review",
+      budgetChars: this.promptBudgetChars(),
     });
 
     // Cross-review does not require tools
@@ -496,6 +520,7 @@ export class AgentLoop {
     const messages = this.context.buildCompactMessages(session.compactContext, history, actualContent, {
       channel: msg.channel,
       chatId: msg.chatId,
+      budgetChars: this.promptBudgetChars(),
     });
 
     const modelToUse = useThinkModel && this.config.thinkModelName 
@@ -506,10 +531,25 @@ export class AgentLoop {
       ? this.thinkProvider
       : this.provider;
 
-    const messagesText = JSON.stringify(messages);
-    const preview = messagesText.slice(0, 1500 * 5).replace(/\\n/g, " ").replace(/\s+/g, " ");
-    logger.info("LLM", `Calling model=${modelToUse}, messages=${messages.length}, tokens~${Math.round(messagesText.length / 4)}, preview=${preview}`);
-    console.log(`[AgentLoop] Calling LLM (model=${modelToUse}, messages=${messages.length})`);
+    // Select dynamic tool schema subset to save tokens and prevent provider confusion
+    const selectedTools = this.selectToolsForMessage(actualContent);
+
+    // Per-component size breakdown for budget visibility (~chars/4 ≈ tokens).
+    const sysLen = typeof messages[0]?.content === "string" ? (messages[0].content as string).length : 0;
+    const histLen = messages.slice(1, -1).reduce((acc, m) => acc + (typeof m.content === "string" ? m.content.length : 0), 0);
+    const userLen = typeof messages[messages.length - 1]?.content === "string" ? (messages[messages.length - 1].content as string).length : 0;
+    const toolDefs = selectedTools.getDefinitions();
+    const toolsLen = JSON.stringify(toolDefs).length;
+    const totalChars = sysLen + histLen + userLen + toolsLen;
+    const totalTokens = Math.round(totalChars / 4);
+    const overBudget = totalTokens > (this.config.maxPromptTokens ?? 2000);
+    logger.info(
+      "LLM",
+      `Calling model=${modelToUse} msgs=${messages.length} tools=${toolDefs.length} ` +
+      `sys~${Math.round(sysLen/4)}t hist~${Math.round(histLen/4)}t user~${Math.round(userLen/4)}t ` +
+      `tools~${Math.round(toolsLen/4)}t total~${totalTokens}t${overBudget ? " [OVER BUDGET]" : ""}`
+    );
+    console.log(`[AgentLoop] Calling LLM (model=${modelToUse}, tokens~${totalTokens}${overBudget ? " OVER" : ""})`);
 
     const hook = new LoopHook(this, {
       onStream: opts?.onStream,
@@ -522,9 +562,6 @@ export class AgentLoop {
         });
       }),
     });
-
-    // Select dynamic tool schema subset to save tokens and prevent provider confusion
-    const selectedTools = this.selectToolsForMessage(actualContent);
 
     const result = await this.runner.run({
       initialMessages: messages,
@@ -582,6 +619,7 @@ export class AgentLoop {
       channel,
       chatId,
       currentRole: "user",
+      budgetChars: this.promptBudgetChars(),
     });
 
     const result = await this.runner.run({
@@ -602,7 +640,7 @@ export class AgentLoop {
   /** Run a task directly (used by subagents and heartbeat). */
   async processSubagentTask(task: string, channel: string, chatId: string): Promise<string> {
     const ctx = new ContextBuilder(this.config.workspaceDir);
-    const messages = ctx.buildMessages([], task, { channel: "system", chatId });
+    const messages = ctx.buildMessages([], task, { channel: "system", chatId, budgetChars: this.promptBudgetChars() });
     const result = await this.runner.run({
       initialMessages: messages,
       tools: this.tools,
@@ -630,6 +668,14 @@ export class AgentLoop {
     }
 
     return registry;
+  }
+
+  /** Convert configured token budget to a char budget for the system prompt
+   * portion. Roughly chars ≈ tokens × 4; we reserve ~50% for history, runtime,
+   * tool schemas, and the user message. */
+  private promptBudgetChars(): number {
+    const tokens = this.config.maxPromptTokens ?? 2000;
+    return Math.max(800, Math.floor(tokens * 4 * 0.5));
   }
 
   /**
@@ -663,13 +709,12 @@ export class AgentLoop {
       .join("\n");
 
     const systemPrompt =
-      "You are a conversation summarizer. Your job is to update a running conversation summary with the details of the most recent turns.\n" +
-      "Provide a highly compact, cohesive summary of the entire conversation so far.\n" +
-      "Highlight important context, tasks currently in progress, and decisions. Avoid conversational fluff. Keep it under 250 words.";
+      "Update a running conversation summary with the new turns below. " +
+      "Keep it under 100 words, factual, no fluff. Reply with the updated summary only.";
 
     const userPrompt =
-      `Existing Summary:\n${session.compactContext || "(No summary yet)"}\n\n` +
-      `New Turns:\n${formattedTurns}`;
+      `Existing:\n${session.compactContext || "(none)"}\n\n` +
+      `New:\n${formattedTurns}`;
 
     try {
       const response = await this.provider.chat({
@@ -677,11 +722,16 @@ export class AgentLoop {
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
-        ]
+        ],
+        // Hard cap so the summary itself doesn't drift upward over time.
+        maxTokens: 200,
       });
 
       if (response.content) {
-        session.compactContext = response.content.trim();
+        // Clamp to ~600 chars (≈150 tokens) regardless of model behaviour.
+        let summary = response.content.trim();
+        if (summary.length > 600) summary = summary.slice(0, 600).trimEnd() + "…";
+        session.compactContext = summary;
         session.lastConsolidated = newLastConsolidated;
         this.sessions.save(session);
         logger.info("Consolidation", `Background consolidation complete for ${key}. New summary length: ${session.compactContext.length}`);
